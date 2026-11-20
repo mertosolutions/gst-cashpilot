@@ -56,6 +56,11 @@ export default function Shell({ children }: { children: ReactNode }) {
           <h1 className="text-xl font-semibold">GST CashPilot</h1>
           <p className="text-sm text-ink-500 mt-1 mb-5">Know your GST cash before you file.</p>
           <button className="btn btn-primary w-full justify-center" onClick={auth.signIn}><LogIn size={16} /> Sign in with Google</button>
+          <div className="mt-5 rounded-xl bg-brand-50 px-4 py-3 text-left text-sm text-ink-700">
+            <p className="font-semibold text-ink-900">Need sample data?</p>
+            <p className="mt-0.5">Download the sample files, then upload them after you sign in.</p>
+            <a className="mt-1.5 inline-block font-semibold text-brand-700 underline underline-offset-2" href="https://drive.google.com/drive/folders/1od3jVwg9Y83ScqZs45hLVBxdC07irhQZ?usp=sharing" target="_blank" rel="noopener noreferrer">Click here for sample data</a>
+          </div>
         </div>
       </div>
     );
