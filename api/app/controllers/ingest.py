@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import CurrentUser, get_business, get_current_user
-from app.models import (Business, Document, Gstr2bEntry, Gstr3bDraft, ItcCheck, Match, PipelineRun, PurchaseInvoice, SalesSummary, Vendor, VendorNotice)
+from app.models import (Business, Document, Gstr2bEntry, Gstr3bDraft, ItcCheck, Match, PipelineRun, PurchaseInvoice, SalesSummary, Vendor)
 from app.schemas.views import Detail
 from app.services import ingest, pipeline
 
@@ -37,7 +37,12 @@ def delete_all_data(db: Session = Depends(get_db), business: Business = Depends(
     """Deletes every uploaded file, invoice, match, decision, draft and scan of this business only. The sign-in stays and the workspace is blank again."""
     files = [d.file_uri for d in db.query(Document).filter_by(business_id=business.id).all() if d.file_uri]
     counts = {}
-    for model in (VendorNotice, ItcCheck, Match, Gstr3bDraft, PipelineRun, SalesSummary, Gstr2bEntry, PurchaseInvoice, Document, Vendor):  # children first
+    try:
+        from app.models import VendorNotice  # vendor notices reference vendors, so they go first when the model exists
+        extra = (VendorNotice,)
+    except ImportError:
+        extra = ()
+    for model in (*extra, ItcCheck, Match, Gstr3bDraft, PipelineRun, SalesSummary, Gstr2bEntry, PurchaseInvoice, Document, Vendor):  # children first
         if not inspect(db.get_bind()).has_table(model.__tablename__):
             continue
         counts[model.__tablename__] = db.query(model).filter_by(business_id=business.id).delete(synchronize_session=False)
