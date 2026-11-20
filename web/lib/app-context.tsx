@@ -13,7 +13,7 @@ const Ctx = createContext<AppState>(null as unknown as AppState);
 export const useApp = () => useContext(Ctx);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const { ready } = useAuth();
+  const { ready, uid, mode } = useAuth();
   const [months, setMonths] = useState<{ month: string; label: string }[]>([]);
   const [month, setMonthState] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
@@ -24,6 +24,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
+    if (mode === "firebase" && !uid) {  // signed out: nothing to load, and no token to send
+      setMonths([]); setMonthState(null); setMe(null); setStatus(null); setError(null); setLoading(false);
+      return;
+    }
+    setLoading(true);
     (async () => {
       try {
         const [m, who, st] = await Promise.all([
@@ -37,7 +42,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } catch (e) { setError((e as Error).message); }
       finally { setLoading(false); }
     })();
-  }, [ready, version]);
+  }, [ready, uid, mode, version]);
 
   const setMonth = useCallback((m: string) => { localStorage.setItem("cashpilot.month", m); setMonthState(m); }, []);
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
