@@ -192,7 +192,7 @@ export default function ScannerPage() {
                     </li>))}
                 </ul>
                 <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <button className="btn btn-primary" disabled={busy || confirmed || blocked} onClick={confirm}><CheckCircle2 size={16} /> {confirmed ? "Added to your books" : "Confirm and add to books"}</button>
+                  <button className="btn btn-primary" disabled={busy || confirmed || blocked} onClick={confirm}>{busy && !confirmed ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <CheckCircle2 size={16} />} {confirmed ? "Added to your books" : busy ? "Adding to your books and re-running the layers..." : "Confirm and add to books"}</button>
                   {blocked && !confirmed && <span className="text-xs text-bad-700">Cannot save yet: {failing.length ? failing.map((c) => c.label).join(", ") : "this invoice is already in your books"}.</span>}
                   <span className="text-xs text-ink-500">Nothing is saved until you confirm.</span>
                 </div>

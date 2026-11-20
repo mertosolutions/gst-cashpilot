@@ -81,6 +81,20 @@ def ensure_rules_loaded(db: Session) -> dict:
     return {"passages": len(existing), "embedded_now": changed, "engine": engine}
 
 
+_VCACHE: dict[tuple[str, int], list[dict]] = {}  # the rule passages do not change, so a query text always gets the same answer
+
+
+def _vertex_many(texts: list[str], k: int) -> list[list[dict]]:
+    """One Vertex AI Search call per DISTINCT query text (many invoices share the same rule query), in parallel, cached for the process."""
+    from concurrent.futures import ThreadPoolExecutor
+    todo = [t for t in dict.fromkeys(texts) if (t, k) not in _VCACHE]
+    if todo:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for t, res in zip(todo, pool.map(lambda x: vertex_search.search(x, k), todo)):
+                _VCACHE[(t, k)] = res
+    return [_VCACHE[(t, k)] for t in texts]
+
+
 def search_many(db: Session, queries: list[dict]) -> list[list[dict]]:
     """queries: [{"text": str, "tags": [str]}]. Returns top-k passages per query with scores.
     Hybrid score = cosine similarity + a small boost when the passage tag matches the rule tag."""
@@ -88,7 +102,7 @@ def search_many(db: Session, queries: list[dict]) -> list[list[dict]]:
     k = cfg["top_k"]
     if vertex_search.enabled():  # managed Google search; any failure falls through to the local engine below
         try:
-            found = [vertex_search.search(q["text"], k) for q in queries]
+            found = _vertex_many([q["text"] for q in queries], k)
             if all(found):
                 _LAST["vertex"] = True
                 return found

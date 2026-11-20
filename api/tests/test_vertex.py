@@ -38,9 +38,11 @@ def test_rag_uses_vertex_search_and_falls_back_to_local(client, monkeypatch):
     with SessionLocal() as db:
         monkeypatch.setattr(vertex_search, "enabled", lambda: True)
         monkeypatch.setattr(vertex_search, "search", lambda q, k, http=None: vertex_search.parse_results(PAYLOAD, k))
+        rag._VCACHE.clear()
         hit = rag.search_many(db, [{"text": "not in gstr-2b", "tags": ["not_in_2b"]}])[0]
         assert hit[0]["engine"] == "vertex-ai-search"
         def boom(q, k, http=None): raise vertex_search.VertexSearchUnavailable("no credentials")
+        rag._VCACHE.clear()  # results are cached per query text, so start clean to see the failure
         monkeypatch.setattr(vertex_search, "search", boom)
         local = rag.search_many(db, [{"text": "not in gstr-2b", "tags": ["not_in_2b"]}])[0]
         assert local and local[0]["engine"] != "vertex-ai-search"  # the app keeps working
