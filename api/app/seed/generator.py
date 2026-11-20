@@ -25,13 +25,14 @@ def _tax(v: float, gstin: str, rate: float):
     return (0.0, round(t / 2, 2), round(t / 2, 2)) if gstin.startswith("27") else (t, 0.0, 0.0)
 
 
-def generate_month(month: str, seed: int, growth: float = 1.0) -> dict[str, bytes]:
+def generate_month(month: str, seed: int, growth: float = 1.0, vendors: list | None = None) -> dict[str, bytes]:
+    VENDORS_ = vendors or VENDORS
     rng = random.Random(seed)
     y, mo = int(month[:4]), int(month[5:])
     books, g2b = [], []
     n = int(rng.randint(40, 52) * growth)
     for i in range(1, n + 1):
-        g, name, p_missing = rng.choice(VENDORS)
+        g, name, p_missing = rng.choice(VENDORS_)
         blocked = g.endswith("3030M1Z7") or (rng.random() < 0.03)
         cat = rng.choice(BLOCKED_CATEGORIES) if blocked else "General purchase"
         v = float(rng.choice([4000, 6500, 8200, 12000, 15500, 21000, 27500, 34000, 42000, 56000]) * growth)
@@ -52,7 +53,7 @@ def generate_month(month: str, seed: int, growth: float = 1.0) -> dict[str, byte
             d["no"] = d["no"].lower().replace("/", "-")
         g2b.append(d)
     for k in range(rng.randint(2, 4)):  # reported by suppliers but not in the books
-        g, name, _ = rng.choice(VENDORS)
+        g, name, _ = rng.choice(VENDORS_)
         v = float(rng.choice([6500, 12000, 21000]))
         igst, cgst, sgst = _tax(v, g, 0.18)
         g2b.append(dict(no=f"X{mo:02d}{900 + k}", date=f"{y:04d}-{mo:02d}-{rng.randint(1, 28):02d}", gstin=g, name=name,
@@ -89,3 +90,66 @@ def generate_month(month: str, seed: int, growth: float = 1.0) -> dict[str, byte
     k = 1.25 + rng.random() * 0.3
     sw.writerow([month, round(sum(b["taxable"] for b in books) * 1.6, 2), round(tot["igst"] * k + 18000, 2), round(tot["cgst"] * k + 45000, 2), round(tot["sgst"] * k + 45000, 2)])
     return {"register": reg.getvalue().encode(), "gstr2b": xb.getvalue(), "sales": sales.getvalue().encode()}
+
+
+def user_profile(uid: str) -> dict:
+    """Per-user variation so every account has its own numbers: a seed, a size, and how risky each vendor is."""
+    import hashlib
+    h = int(hashlib.sha256(uid.encode()).hexdigest(), 16)
+    rng = random.Random(h)
+    vendors = [(g, n, min(0.6, max(0.01, round(p * rng.uniform(0.4, 1.8), 3)))) for g, n, p in VENDORS]
+    return {"seed": h % 100000, "scale": round(rng.uniform(0.7, 1.4), 2), "vendors": vendors, "drop": round(rng.uniform(0.05, 0.15), 2)}
+
+
+def personalize_october(register: bytes, gstr2b: bytes, sales: bytes, profile: dict) -> tuple[bytes, bytes, bytes]:
+    """Makes the shared October fixture unique per user: scales the amounts and drops some invoices, the same way in the register and GSTR-2B
+    so the match results stay consistent. The 2B-only entries (X900 to X902) are kept as they are, because the sample scans refer to them."""
+    from openpyxl import load_workbook
+
+    from app.services.util import clean_invoice_no
+    rng = random.Random(profile["seed"] + 7)
+    f = profile["scale"]
+    rows = list(csv.DictReader(io.StringIO(register.decode())))
+    keep, scaled = [], {}
+    for r in rows:
+        key = (r["supplier_gstin"], clean_invoice_no(r["invoice_no"]))
+        if rng.random() < profile["drop"]:
+            scaled[key] = None
+            continue
+        for c in ("taxable_value", "igst", "cgst", "sgst"):
+            r[c] = round(float(r[c]) * f, 2)
+        scaled[key] = True
+        keep.append(r)
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=list(rows[0].keys()))
+    w.writeheader()
+    w.writerows(keep)
+    wb = load_workbook(io.BytesIO(gstr2b))
+    ws = wb["B2B"]
+    header = [c.value for c in ws[1]]
+    col = {h: i for i, h in enumerate(header)}
+    drop_rows = []
+    for ridx, row in enumerate(ws.iter_rows(min_row=2), start=2):
+        key = (row[col["GSTIN of supplier"]].value, clean_invoice_no(str(row[col["Invoice number"]].value)))
+        if key not in scaled:
+            continue  # 2B-only entry: keep untouched
+        if scaled[key] is None:
+            drop_rows.append(ridx)
+            continue
+        for h in ("Taxable Value", "Integrated Tax", "Central Tax", "State/UT Tax"):
+            c = row[col[h]]
+            c.value = round(float(c.value) * f, 2)
+        row[col["Invoice Value"]].value = round(sum(float(row[col[h]].value) for h in ("Taxable Value", "Integrated Tax", "Central Tax", "State/UT Tax")), 2)
+    for ridx in reversed(drop_rows):
+        ws.delete_rows(ridx)
+    xb = io.BytesIO()
+    wb.save(xb)
+    srows = list(csv.DictReader(io.StringIO(sales.decode())))
+    for r in srows:
+        for c in ("taxable_value", "igst", "cgst", "sgst"):
+            r[c] = round(float(r[c]) * f, 2)
+    so = io.StringIO()
+    sw = csv.DictWriter(so, fieldnames=list(srows[0].keys()))
+    sw.writeheader()
+    sw.writerows(srows)
+    return out.getvalue().encode(), xb.getvalue(), so.getvalue().encode()

@@ -2,6 +2,13 @@ const BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8010").replac
 let authProvider: () => Promise<Record<string, string>> = async () => ({});
 export const setAuthProvider = (fn: () => Promise<Record<string, string>>) => { authProvider = fn; };
 export const API_BASE = BASE;
+/** Credentials sent as the first WebSocket message (browsers cannot set headers on one). */
+export async function wsAuthQuery(): Promise<Record<string, string>> {
+  const h = await authProvider();
+  if (h.Authorization) return { token: h.Authorization.replace(/^Bearer\s+/i, "") };
+  if (h["X-Demo-User"]) return { user: h["X-Demo-User"] };
+  return {};
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -15,7 +22,20 @@ function qs(params?: Record<string, unknown>): string {
   return s ? `?${s}` : "";
 }
 
+/** Count of GET requests in flight, so the shell can keep a loader up until a whole page has its data. */
+let pending = 0;
+const watchers = new Set<(n: number) => void>();
+const bump = (d: number) => { pending += d; watchers.forEach((w) => w(pending)); };
+export const pendingRequests = () => pending;
+export function watchPending(fn: (n: number) => void): () => void { watchers.add(fn); return () => { watchers.delete(fn); }; }
+
 async function request<T>(method: string, path: string, opts: { params?: Record<string, unknown>; json?: unknown; form?: FormData } = {}): Promise<T> {
+  const track = method === "GET";
+  if (track) bump(1);
+  try { return await send<T>(method, path, opts); } finally { if (track) bump(-1); }
+}
+
+async function send<T>(method: string, path: string, opts: { params?: Record<string, unknown>; json?: unknown; form?: FormData }): Promise<T> {
   const headers: Record<string, string> = { ...(await authProvider()) };
   let body: BodyInit | undefined;
   if (opts.json !== undefined) { headers["Content-Type"] = "application/json"; body = JSON.stringify(opts.json); }

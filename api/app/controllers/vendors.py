@@ -15,10 +15,10 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
 
 @router.get("", response_model=VendorList)
 def list_vendors(month: str = Depends(month_param), window: int = Query(1, ge=1, le=12, description="months to look back, ending at `month`"),
-                 sort: str = "at_risk", order: Literal["asc", "desc"] = "desc", limit: int = Query(8, ge=0, le=100),
+                 sort: str = "at_risk", order: Literal["asc", "desc"] = "desc", limit: int = Query(8, ge=0, le=100), offset: int = Query(0, ge=0),
                  risk: Literal["low", "medium", "high"] | None = None, q: str | None = None,
                  db: Session = Depends(get_db), business: Business = Depends(get_business)):
-    return analytics.vendors(db, business.id, month, window, sort, order, limit, risk, q)
+    return analytics.vendors(db, business.id, month, window, sort, order, limit, risk, q, offset)
 
 
 @router.get("/{gstin}", response_model=Detail)

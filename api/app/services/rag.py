@@ -10,7 +10,7 @@ import zlib
 from sqlalchemy.orm import Session
 
 from app.models import LegalChunk
-from app.services import gemini
+from app.services import gemini, vertex_search
 from app.services.util import rules_config, rules_passages
 
 DIM = 768  # same size as the vector(768) column on AlloyDB
@@ -37,6 +37,10 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 def current_engine() -> str:
     return "gemini-embedding" if gemini.enabled() else "local-hash"
+
+
+def backend_name() -> str:
+    return "vertex-ai-search" if vertex_search.enabled() else current_engine()
 
 
 def embed_many(texts: list[str], engine: str) -> list[list[float]]:
@@ -76,6 +80,13 @@ def search_many(db: Session, queries: list[dict]) -> list[list[dict]]:
     Hybrid score = cosine similarity + a small boost when the passage tag matches the rule tag."""
     cfg = rules_config()
     k = cfg["top_k"]
+    if vertex_search.enabled():  # managed Google search; any failure falls through to the local engine below
+        try:
+            found = [vertex_search.search(q["text"], k) for q in queries]
+            if all(found):
+                return found
+        except Exception:  # noqa: BLE001
+            pass
     chunks = db.query(LegalChunk).all()
     if not chunks or not queries:
         return [[] for _ in queries]

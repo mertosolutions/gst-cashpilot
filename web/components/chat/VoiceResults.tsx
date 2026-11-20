@@ -7,7 +7,7 @@ import type { ReconItem, VendorRow } from "@/lib/types";
 export interface VoiceAnswer {
   transcript: string; english: string | null; language: string; month: string; intent: string; filters: Record<string, unknown>;
   answer: string; spoken: string; spoken_language: string; engine: string; notes: string[];
-  results: { type: "invoices" | "vendors" | "cash" | "none"; items: unknown[] };
+  results: { type: "invoices" | "vendors" | "cash" | "help" | "none"; items: unknown[]; metric?: "at_risk" | "blocked" | "spend" };
 }
 
 const FILTER_LABEL: Record<string, string> = { status: "Status", match: "Match", vendor: "Vendor", invoice: "Invoice", month: "Month" };
@@ -27,8 +27,15 @@ export function FilterChips({ filters }: { filters: Record<string, unknown> }) {
 }
 
 /** Compact result list inside the chat. Rows open the same detail drawers as the rest of the app. */
-export function ChatResults({ a, onInvoice, onVendor }: { a: VoiceAnswer; onInvoice: (id: string) => void; onVendor: (gstin: string) => void }) {
+export function ChatResults({ a, onInvoice, onVendor, onAsk }: { a: VoiceAnswer; onInvoice: (id: string) => void; onVendor: (gstin: string) => void; onAsk?: (q: string) => void }) {
   const r = a.results;
+  if (r.type === "help") {
+    return (
+      <div className="mt-3 flex flex-col gap-2">
+        {(r.items as string[]).map((q) => <button key={q} onClick={() => onAsk?.(q)} className="rounded-xl border border-brand-500/25 bg-brand-50/50 px-3 py-2 text-left text-[13px] font-medium text-brand-700 hover:bg-brand-50">{q}</button>)}
+      </div>
+    );
+  }
   if (r.type === "cash") {
     const items = r.items as { case: string; label: string; cash: number }[];
     return (
@@ -44,6 +51,7 @@ export function ChatResults({ a, onInvoice, onVendor }: { a: VoiceAnswer; onInvo
   }
   if (r.type === "vendors") {
     const items = (r.items as VendorRow[]).slice(0, 5);
+    const metric = r.metric ?? "at_risk";
     if (!items.length) return null;
     return (
       <ul className="mt-2 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
@@ -51,7 +59,7 @@ export function ChatResults({ a, onInvoice, onVendor }: { a: VoiceAnswer; onInvo
           <li key={v.vendor_id}>
             <button onClick={() => onVendor(v.gstin)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-brand-50/40">
               <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{v.name}</span><span className="block text-[11px] text-ink-500">{v.matched_pct}% matched</span></span>
-              <span className="text-right text-[13px] font-semibold text-warn-700">{inr(v.at_risk)}</span>
+              <span className={metric === "spend" ? "text-right text-[13px] font-semibold text-ink-900" : "text-right text-[13px] font-semibold text-warn-700"}>{inr(metric === "spend" ? v.spend : metric === "blocked" ? v.blocked : v.at_risk)}</span>
               <Pill kind={v.risk_level} />
             </button>
           </li>

@@ -61,11 +61,18 @@ def _process(db: Session, business: Business, data: bytes, filename: str, conten
     return _out(doc)
 
 
+SAMPLES = [
+    ("gst_invoice_1_resolves_missing_in_books.pdf", "Valid GST invoice", "All checks pass. It resolves an entry that is in GSTR-2B but missing from your books."),
+    ("scan_wrong_total_x901.pdf", "Invoice with a wrong total", "The total does not add up, so the checks stop it from being saved."),
+]
+
+
 @router.get("/samples")
 def samples(business: Business = Depends(get_business)):
-    if not list(SCAN_DIR.glob("*.pdf")):
+    """Two curated sample scans. Any other sample file can still be processed by name."""
+    if not (SCAN_DIR / SAMPLES[0][0]).exists():
         make_sample_scans()
-    return [{"name": p.name, "size_kb": round(p.stat().st_size / 1024, 1)} for p in sorted(SCAN_DIR.glob("*.pdf"))]
+    return [{"name": n, "title": t, "description": d} for n, t, d in SAMPLES if (SCAN_DIR / n).exists()]
 
 
 @router.post("/samples/{name}", response_model=ScanOut)

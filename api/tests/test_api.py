@@ -1,6 +1,8 @@
 import pytest
 
 H = {"X-Demo-User": "demo-owner"}
+# the UI lists two samples; every sample file can still be processed by name
+NAMES = {"matches_gstr2b": "scan_matches_gstr2b_x902.pdf", "wrong_total": "scan_wrong_total_x901.pdf", "new_invoice": "scan_new_invoice_not_in_gstr2b.pdf", "igst_not_in_2b": "gst_invoice_2_igst_not_in_2b.pdf"}
 
 
 def get(client, path, **params):
@@ -68,7 +70,7 @@ def test_users_are_isolated_from_each_other(client):
     assert {v["vendor_id"] for v in v1}.isdisjoint({v["vendor_id"] for v in v2})
     # a change made by the other user does not touch the first user's books
     samples = client.get("/api/v1/scans/samples", headers=other_h).json()
-    new = next(s for s in samples if "new_invoice" in s["name"])
+    new = {"name": NAMES["new_invoice"]}
     scan = client.post(f"/api/v1/scans/samples/{new['name']}", headers=other_h).json()
     f = scan["fields"]
     body = {k: f[k] for k in ("supplier_name", "supplier_gstin", "invoice_no", "invoice_date", "taxable_value", "igst", "cgst", "sgst", "category")}
@@ -78,7 +80,7 @@ def test_users_are_isolated_from_each_other(client):
 
 def test_scanner_flow_and_impact(client):
     samples = client.get("/api/v1/scans/samples", headers=H).json()
-    ok = next(s for s in samples if "matches_gstr2b" in s["name"])
+    ok = {"name": NAMES["matches_gstr2b"]}
     scan = client.post(f"/api/v1/scans/samples/{ok['name']}", headers=H)
     assert scan.status_code == 200, scan.text
     s = scan.json()
@@ -95,7 +97,7 @@ def test_scanner_flow_and_impact(client):
 
 def test_bad_scan_fails_validation(client):
     samples = client.get("/api/v1/scans/samples", headers=H).json()
-    bad = next(s for s in samples if "wrong_total" in s["name"])
+    bad = {"name": NAMES["wrong_total"]}
     s = client.post(f"/api/v1/scans/samples/{bad['name']}", headers=H).json()
     assert any(c["key"] == "total" and c["status"] == "fail" for c in s["checks"])
 
@@ -142,7 +144,7 @@ def test_non_gst_invoice_cannot_be_saved(client, tmp_path):
 
 def test_undo_removes_a_confirmed_scan(client):
     samples = client.get("/api/v1/scans/samples", headers=H).json()
-    new = next(s for s in samples if "new_invoice" in s["name"])
+    new = {"name": NAMES["new_invoice"]}
     s = client.post(f"/api/v1/scans/samples/{new['name']}", headers=H).json()
     f = s["fields"]
     body = {k: f[k] for k in ("supplier_name", "supplier_gstin", "invoice_no", "invoice_date", "taxable_value", "igst", "cgst", "sgst", "category")}
@@ -173,7 +175,7 @@ def test_a_gst_return_summary_is_not_accepted_as_an_invoice(client, tmp_path):
 
 def test_delete_a_scan_and_a_confirmed_scan(client):
     samples = client.get("/api/v1/scans/samples", headers=H).json()
-    wrong = next(s for s in samples if "wrong_total" in s["name"])
+    wrong = {"name": NAMES["wrong_total"]}
     s1 = client.post(f"/api/v1/scans/samples/{wrong['name']}", headers=H).json()
     r = client.delete(f"/api/v1/scans/{s1['id']}", headers=H)
     assert r.status_code == 200 and r.json()["removed_from_books"] is False
@@ -181,7 +183,7 @@ def test_delete_a_scan_and_a_confirmed_scan(client):
     assert client.delete(f"/api/v1/scans/{s1['id']}", headers=H).status_code == 404
     # a scan that is already in the books: deleting it removes the invoice too
     before = get(client, "/dashboard/summary", month="2026-10")["current"]["invoices"]
-    new = next(s for s in samples if "igst_not_in_2b" in s["name"])
+    new = {"name": NAMES["igst_not_in_2b"]}
     s2 = client.post(f"/api/v1/scans/samples/{new['name']}", headers=H).json()
     f = s2["fields"]
     body = {k: f[k] for k in ("supplier_name", "supplier_gstin", "invoice_no", "invoice_date", "taxable_value", "igst", "cgst", "sgst", "category")}
@@ -190,3 +192,65 @@ def test_delete_a_scan_and_a_confirmed_scan(client):
     d = client.delete(f"/api/v1/scans/{s2['id']}", headers=H).json()
     assert d["removed_from_books"] is True
     assert get(client, "/dashboard/summary", month="2026-10")["current"]["invoices"] == before
+
+
+def test_two_curated_samples_are_listed(client):
+    r = client.get("/api/v1/scans/samples", headers=H).json()
+    assert len(r) == 2 and all(x["title"] and x["description"] for x in r)
+
+
+def test_vendor_pages_of_five(client):
+    p1 = get(client, "/vendors", month="2026-10", limit=5, offset=0)
+    p2 = get(client, "/vendors", month="2026-10", limit=5, offset=5)
+    assert len(p1["items"]) == 5 and p1["total_matching"] >= 10
+    assert {v["vendor_id"] for v in p1["items"]}.isdisjoint({v["vendor_id"] for v in p2["items"]})
+
+
+def test_trend_still_charts_for_the_first_month(client):
+    """Selecting the earliest month used to leave the trend empty (nothing before it). The window now starts at the first month."""
+    t = get(client, "/dashboard/trends", month="2026-05", months=3)
+    assert [m["month"] for m in t] == ["2026-05", "2026-06", "2026-07"]
+    assert [m["month"] for m in get(client, "/dashboard/trends", month="2026-10", months=3)] == ["2026-08", "2026-09", "2026-10"]
+    assert [m["month"] for m in get(client, "/dashboard/trends", month="2026-07", months=3)] == ["2026-05", "2026-06", "2026-07"]
+    assert len(get(client, "/dashboard/trends", month="2026-05", months=6)) == 6
+    ins = get(client, "/dashboard/insights", month="2026-05")
+    assert isinstance(ins, list)  # no crash when there is no previous month
+
+
+def test_rules_endpoint_lists_decision_rules_and_passages(client):
+    r = get(client, "/pipeline/rules", month="2026-10")
+    keys = [d["key"] for d in r["decision_rules"]]
+    assert keys[:3] == ["not_in_2b", "itc_not_available", "blocked_category"] and keys[-1] == "no_rule_found"
+    assert len(r["passages"]) == 15 and all(p["citation"] and p["body"] for p in r["passages"])
+    assert sum(d["used"] for d in r["decision_rules"]) == r["invoices_checked"]
+    assert any("17(5)" in p["citation"] and p["used"] > 0 for p in r["passages"])  # the blocked invoices cite Section 17(5)
+    assert r["needs_ca_review"] is True
+
+
+def test_dashboard_cache_is_cleared_after_a_write(client):
+    from app.core import cache
+    a = get(client, "/dashboard/summary", month="2026-10")
+    assert get(client, "/dashboard/summary", month="2026-10") == a  # second call served from the cache
+    assert cache._store  # something is cached
+    client.post("/api/v1/pipeline/run", params={"month": "2026-10"}, headers=H)
+    assert not any(k[0] == "summary" for k in cache._store)  # the write cleared it
+
+
+def test_real_user_starts_blank_and_builds_from_own_upload(client):
+    """A Google sign-in gets an empty workspace (no demo data); the GSTIN is learned from the user's own GSTR-2B."""
+    from pathlib import Path
+    from app.core.database import SessionLocal
+    from app.core.security import CurrentUser, get_business
+    from app.services import analytics
+    with SessionLocal() as db:
+        b = get_business(CurrentUser(uid="google-blank-user-1", name="New Owner", demo=False), db)
+        assert b.gstin == "" and b.legal_name == "New Owner"
+        assert analytics.available_months(db, b.id) == []
+    sample = Path(__file__).resolve().parents[1] / "app/data/sample"
+    with SessionLocal() as db:
+        from app.services import ingest
+        b = get_business(CurrentUser(uid="google-blank-user-1", name="New Owner", demo=False), db)
+        ingest.ingest_gstr2b(db, b, (sample / "GSTR-2B_oct2026_dummy.xlsx").read_bytes(), "g.xlsx")
+        ingest.ingest_purchase_register(db, b, (sample / "purchase_register_oct2026.csv").read_bytes(), "r.csv")
+        assert b.gstin == "27AAAAA0000A1Z5"
+        assert analytics.available_months(db, b.id) == ["2026-10"]

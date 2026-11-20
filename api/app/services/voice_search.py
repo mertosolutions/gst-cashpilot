@@ -169,6 +169,10 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
     wants_cash = bool(re.search(r"\b(cash|payable|how much (?:do i|will i|to) pay|pay)\b", t)) and not (status or match or vendor or inv_tok)
     wants_vendors = bool(re.search(r"\b(vendors?|suppliers?)\b", t)) and not vendor and not inv_tok and not match and (status in (None, "at_risk", "blocked"))
     wants_count = bool(re.search(r"\b(how many|count|number of)\b", t))
+    risk_cue = bool(re.search(r"block|risk|credit|itc|claim|unconfirmed|not confirmed|not filed|mismatch", t)) or status in ("at_risk", "blocked")
+    by_spend = bool(re.search(r"purchas|bought|\bbuy\b|spend|spent|biggest|largest|top supplier|top vendor|most from", t)) and not risk_cue
+    asks_customers = bool(re.search(r"\b(buyers?|customers?|clients?|who bought|sold to|sales to|who (?:do|did) i sell)\b", t)) and not vendor
+    asks_business = bool(re.search(r"\b(my gstin|my business|my company|company name|who am i|business name|my name)\b", t))
     if status:
         f["status"] = status
     if match:
@@ -181,7 +185,11 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
         f["invoice"] = inv_tok
 
     res: dict = {"type": "none", "items": []}
-    if inv_tok:
+    if re.match(r"^\s*(hi|hii|hello|hey|namaste|vanakkam|good (morning|afternoon|evening)|help|what can you do|how (do|does) (you|this) work|who are you)\b", t) and not (status or match or vendor or inv_tok or wants_cash or wants_vendors or wants_count or amount):
+        intent = "help"
+        res = {"type": "help", "items": suggestions(db, business_id, month)[:4]}
+        spoken = "Hi, I am CashPilot. Ask me about your vendors, at-risk or blocked invoices, invoices missing in GSTR-2B, or your cash payable."
+    elif inv_tok:
         row = known[clean_invoice_no(inv_tok)]
         d = analytics.reconciliation_detail(db, business_id, row["match_id"]) or {}
         dec = d.get("decision")
@@ -197,18 +205,33 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
         spoken = (f"For {month_label(month)}, your cash payable is {inr(fg['cash_a'])} if you claim only the eligible credit, and {inr(fg['cash_b'])} if you also claim "
                   f"the at-risk credit. The difference of {inr(fg['cash_a'] - fg['cash_b'])} is credit that is not confirmed by GSTR-2B.")
         intent = "cash_payable"
-    elif wants_vendors:
+    elif asks_customers or asks_business:
+        from app.models import Business
+        b = db.get(Business, business_id)
+        intent = "about_business" if asks_business and not asks_customers else "customers_scope"
+        if intent == "about_business":
+            spoken = f"Your business is {b.legal_name}, GSTIN {b.gstin}. You are the buyer on every purchase invoice in CashPilot."
+        else:
+            spoken = (f"You, {b.legal_name}, are the buyer on every purchase invoice here. CashPilot works with your purchases and GSTR-2B, so it knows your sales only as monthly totals, "
+                      "not who your customers are (that is GSTR-1 data). I can tell you about your vendors, invoices, ITC and cash payable.")
+        res = {"type": "help", "items": suggestions(db, business_id, month)[:3]}
+    elif wants_vendors or by_spend:
         n = top_n or 5
-        sort = "blocked" if status == "blocked" else "at_risk"
+        sort = "blocked" if status == "blocked" else ("spend" if by_spend else "at_risk")
         v = analytics.vendors(db, business_id, month, window=1, sort=sort, limit=n)
         rows = [r for r in v["items"] if r[sort] > 0]
-        res = {"type": "vendors", "items": rows}
-        if rows:
+        res = {"type": "vendors", "items": rows, "metric": sort}
+        if sort == "spend":
+            intent = "top_vendors_by_purchase"
+            spoken = (f"Your top vendors by purchases in {month_label(month)} are: " + ", ".join(f"{r['name']} {inr(r['spend'])}" for r in rows[:3]) + "." if rows
+                      else f"There are no purchases in {month_label(month)}.")
+        elif rows:
             parts = [f"{r['name']} {inr(r[sort])}" for r in rows[:3]]
             spoken = f"In {month_label(month)}, {'blocked' if sort == 'blocked' else 'at-risk'} credit is held mostly by: " + ", ".join(parts) + (f". The top three hold {v['top3_share']:.0f} percent of the at-risk credit." if sort == "at_risk" else ".")
         else:
             spoken = f"No vendors hold {'blocked' if sort == 'blocked' else 'at-risk'} credit in {month_label(month)}."
-        intent = "top_vendors"
+        if sort != "spend":
+            intent = "top_vendors"
     elif status or match or vendor or amount or wants_count:
         lst = analytics.reconciliation_items(db, business_id, month, match_type=match, itc_status=status, vendor_gstin=vendor.gstin if vendor else None,
                                              sort="at_risk" if status != "eligible" else "claimable", page_size=200)

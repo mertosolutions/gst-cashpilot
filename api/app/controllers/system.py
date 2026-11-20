@@ -28,7 +28,7 @@ def status(db: Session = Depends(get_db)):
         adk_version = "not installed"
     return SystemStatus(
         api="ok", database=f"{dialect_name()} ({'AlloyDB-ready' if dialect_name() == 'postgresql' else 'local'})", auth_mode=s.auth_mode,
-        gemini_configured=s.gemini_enabled, gemini_model=s.gemini_model, embedding_engine=rag.current_engine(), adk_version=adk_version,
+        gemini_configured=s.gemini_enabled, gemini_model=s.gemini_model, embedding_engine=rag.backend_name(), adk_version=adk_version,
         rules_indexed=db.query(func.count(LegalChunk.id)).scalar() or 0,
         tenant_isolation="row level security + token scoped queries" if dialect_name() == "postgresql" else "token scoped queries (RLS applies on AlloyDB)")
 

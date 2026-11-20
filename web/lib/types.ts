@@ -12,7 +12,7 @@ export interface VendorRow {
   vendor_id: string; gstin: string; name: string; invoices: number; spend: number; tax: number; eligible: number; at_risk: number; blocked: number;
   issues: number; missing_in_2b: number; amount_mismatch: number; missing_in_books: number; matched_pct: number; share_of_risk: number; risk_level: "low" | "medium" | "high";
 }
-export interface VendorList { month: string; window: number; months: string[]; total_vendors: number; shown: number; total_at_risk: number; top3_share: number; items: VendorRow[] }
+export interface VendorList { month: string; window: number; months: string[]; total_vendors: number; total_matching: number; offset: number; shown: number; total_at_risk: number; top3_share: number; items: VendorRow[] }
 export interface ReconItem {
   match_id: string; invoice_id: string | null; invoice_no: string; date: string; vendor: string; gstin: string; category: string | null; taxable: number;
   tax_books: number | null; tax_2b: number | null; match_type: MatchType; diff: number; itc_status: ItcStatus | null; partial: boolean; claimable: number; at_risk: number;

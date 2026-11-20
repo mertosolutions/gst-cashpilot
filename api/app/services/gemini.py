@@ -34,12 +34,17 @@ def available() -> bool:
 @lru_cache
 def _client():
     s = get_settings()
-    if not s.gemini_api_key:
-        raise GeminiUnavailable("GEMINI_API_KEY is not set")
+    if not s.gemini_enabled:
+        raise GeminiUnavailable("No Gemini credentials are configured")
     from google import genai
     from google.genai import types
     # one attempt and a timeout: waiting through long retries is worse than falling back to the local engine
-    return genai.Client(api_key=s.gemini_api_key, http_options=types.HttpOptions(timeout=45_000, retry_options=types.HttpRetryOptions(attempts=1)))
+    http = types.HttpOptions(timeout=45_000, retry_options=types.HttpRetryOptions(attempts=1))
+    if s.genai_backend == "vertex":
+        if s.vertex_api_key:  # Vertex AI express mode
+            return genai.Client(vertexai=True, api_key=s.vertex_api_key, http_options=http)
+        return genai.Client(vertexai=True, project=s.google_cloud_project, location=s.google_cloud_location, http_options=http)
+    return genai.Client(api_key=s.gemini_api_key, http_options=http)
 
 
 def enabled() -> bool:

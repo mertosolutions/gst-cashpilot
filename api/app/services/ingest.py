@@ -70,6 +70,20 @@ def ingest_purchase_register(db: Session, business: Business, data: bytes, filen
     return {"rows": len(rows), "months": sorted(months)}
 
 
+def _recipient_gstin(data: bytes) -> str | None:
+    import re
+    from openpyxl import load_workbook
+    try:
+        ws = load_workbook(io.BytesIO(data), read_only=True, data_only=True).worksheets[0]
+        for row in ws.iter_rows(values_only=True):
+            for v in row:
+                if isinstance(v, str) and re.fullmatch(r"\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]", v.strip().upper()):
+                    return v.strip().upper()
+    except Exception:
+        return None
+    return None
+
+
 def ingest_gstr2b(db: Session, business: Business, data: bytes, filename: str = "") -> dict:
     rows = _rows_from_xlsx(data, "B2B") if filename.lower().endswith(".xlsx") else _rows_from_csv(data)
     need = ["gstin of supplier", "invoice number", "invoice date", "taxable value", "integrated tax", "central tax", "state/ut tax"]
@@ -77,6 +91,8 @@ def ingest_gstr2b(db: Session, business: Business, data: bytes, filename: str = 
     if missing:
         raise ValueError(f"GSTR-2B B2B sheet is missing columns: {', '.join(missing)}")
     months = {month_of(parse_date(r["invoice date"])) for r in rows}
+    if not business.gstin and filename.lower().endswith(".xlsx"):
+        business.gstin = _recipient_gstin(data) or business.gstin  # a new business learns its GSTIN from its own GSTR-2B
     db.query(Gstr2bEntry).filter(Gstr2bEntry.business_id == business.id, Gstr2bEntry.month.in_(months)).delete(synchronize_session=False)
     cache: dict = {}
     for r in rows:

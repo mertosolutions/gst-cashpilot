@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Card, ErrorBox, Segmented, Skeleton } from "@/components/ui";
+import { Card, ErrorBox, Skeleton } from "@/components/ui";
 import { inr, pct, shortMonth } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import type { MonthMetrics } from "@/lib/types";
@@ -25,23 +25,20 @@ function Tip({ active, payload, label, unitPct }: { active?: boolean; payload?: 
   );
 }
 
-const KPI_TO_VIEW: Record<string, View> = { purchase_total: "spend", invoices: "spend", output_tax: "cash", cash_safe: "cash", cash_full: "cash", eligible: "itc", at_risk: "itc", blocked: "itc", match_rate: "match", flagged: "match" };
-export const viewForKpi = (k: string): View => KPI_TO_VIEW[k] ?? "spend";
-
-export default function TrendPanel({ focus }: { focus: string }) {
-  const [view, setView] = useState<View>(viewForKpi(focus));
+export default function TrendPanel() {
+  const [view, setView] = useState<View>("spend");
   const [range, setRange] = useState(6);
-  const [lastFocus, setLastFocus] = useState(focus);
-  if (focus !== lastFocus) { setLastFocus(focus); setView(viewForKpi(focus)); }
   const { data, error, reload } = useApi<MonthMetrics[]>("/dashboard/trends", { months: range });
   const rows = (data ?? []).map((m) => ({ ...m, name: shortMonth(m.month) }));
   const axis = { tick: { fill: "#6b7280", fontSize: 11 }, tickLine: false, axisLine: false } as const;
 
   return (
-    <Card title="Trends and detailed analysis" subtitle="Click a card above to jump to its view"
-      action={<div className="flex flex-wrap items-center gap-2 justify-end"><Segmented value={view} onChange={setView} options={VIEWS} /><Segmented value={range} onChange={setRange} options={[{ value: 3, label: "3M" }, { value: 6, label: "6M" }]} /></div>}>
+    <Card title="Trend"
+      action={<div className="flex items-center gap-2">
+        <select className="input !w-auto !py-1 text-sm" value={view} onChange={(e) => setView(e.target.value as View)} aria-label="Trend view">{VIEWS.map((v) => <option key={v.value} value={v.value}>{v.label}</option>)}</select>
+        <select className="input !w-auto !py-1 text-sm" value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="Months">{[3, 6].map((n) => <option key={n} value={n}>{n} months</option>)}</select></div>}>
       {error ? <ErrorBox message={error} onRetry={reload} /> : !data ? <Skeleton className="h-72" /> : rows.length < 2 ? <p className="text-sm text-ink-500 py-10 text-center">Trends need at least two months of data.</p> : (
-        <div className="h-80">
+        <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             {view === "spend" ? (
               <ComposedChart data={rows} margin={{ left: 0, right: 8, top: 8 }}>

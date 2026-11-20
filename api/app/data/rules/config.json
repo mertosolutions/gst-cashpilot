@@ -69,5 +69,75 @@
   }
  ],
  "min_rule_score": 0.05,
- "top_k": 3
+ "top_k": 3,
+ "decision_rules": [
+  {
+   "order": 1,
+   "key": "not_in_2b",
+   "when": "The invoice is not in GSTR-2B",
+   "outcome": "at_risk",
+   "detail": "The government record does not confirm the supplier reported it.",
+   "tags": [
+    "not_in_2b"
+   ]
+  },
+  {
+   "order": 2,
+   "key": "itc_not_available",
+   "when": "GSTR-2B marks the ITC as not available",
+   "outcome": "at_risk",
+   "detail": "The invoice is listed but the credit is not allowed yet.",
+   "tags": [
+    "not_in_2b"
+   ]
+  },
+  {
+   "order": 3,
+   "key": "blocked_category",
+   "when": "The purchase is in a blocked category",
+   "outcome": "blocked",
+   "detail": "For example motor vehicles, food, club membership, construction or personal use.",
+   "tags": [
+    "blocked_category"
+   ]
+  },
+  {
+   "order": 4,
+   "key": "too_old",
+   "when": "The claim time limit has passed",
+   "outcome": "blocked",
+   "detail": "Credit must be claimed by 30 November after the financial year of the invoice.",
+   "tags": [
+    "too_old"
+   ]
+  },
+  {
+   "order": 5,
+   "key": "amount_above_2b",
+   "when": "Your books show more tax than GSTR-2B",
+   "outcome": "eligible_partial",
+   "detail": "Only the amount in GSTR-2B is claimable. The extra is at risk.",
+   "tags": [
+    "amount_above_2b"
+   ]
+  },
+  {
+   "order": 6,
+   "key": "eligible",
+   "when": "Everything above is clear and the invoice matches",
+   "outcome": "eligible",
+   "detail": "Invoice is in GSTR-2B with the same amount.",
+   "tags": [
+    "eligible"
+   ]
+  },
+  {
+   "order": 7,
+   "key": "no_rule_found",
+   "when": "No rule passage is found for the case",
+   "outcome": "at_risk",
+   "detail": "The tool never guesses a rule. It holds the credit and asks you to check with your CA.",
+   "tags": []
+  }
+ ]
 }

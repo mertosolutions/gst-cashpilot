@@ -43,8 +43,18 @@ def month_metrics(db: Session, business_id: str, month: str) -> dict:
     }
 
 
+def trend_months(available: list[str], month: str, n: int) -> list[str]:
+    """The n months to chart. They end at the selected month; when fewer than n earlier months exist (for example the first month),
+    the window starts at the first month instead, so a chart is always shown when at least two months of data exist."""
+    if month not in available:
+        return available[-n:]
+    i = available.index(month)
+    start = max(0, min(i - n + 1, len(available) - n))
+    return available[start:start + n]
+
+
 def trends(db: Session, business_id: str, month: str, n: int = 6) -> list[dict]:
-    return [month_metrics(db, business_id, m) for m in months_window(month, n) if m in set(available_months(db, business_id))]
+    return [month_metrics(db, business_id, m) for m in trend_months(available_months(db, business_id), month, n)]
 
 
 KPI_DEFS = [
@@ -120,7 +130,7 @@ SORT_KEYS = {"at_risk", "spend", "invoices", "issues", "matched_pct", "blocked",
 
 
 def vendors(db: Session, business_id: str, month: str, window: int = 1, sort: str = "at_risk", order: str = "desc",
-            limit: int = 8, risk: str | None = None, q: str | None = None) -> dict:
+            limit: int = 8, risk: str | None = None, q: str | None = None, offset: int = 0) -> dict:
     months = months_window(month, max(1, window))
     rows = _vendor_rows(db, business_id, months)
     total = len(rows)
@@ -132,9 +142,10 @@ def vendors(db: Session, business_id: str, month: str, window: int = 1, sort: st
     rows.sort(key=lambda r: (r[sort] if sort != "name" else r["name"].lower()), reverse=(order != "asc"))
     all_risk = sum(r["at_risk"] for r in rows)
     top3 = sum(r["at_risk"] for r in sorted(rows, key=lambda r: r["at_risk"], reverse=True)[:3])
-    return {"month": month, "window": window, "months": months, "total_vendors": total, "shown": min(limit, len(rows)),
+    page_rows = rows[offset:offset + limit] if limit else rows
+    return {"month": month, "window": window, "months": months, "total_vendors": total, "total_matching": len(rows), "offset": offset, "shown": len(page_rows),
             "total_at_risk": money(all_risk), "top3_share": round(top3 / all_risk * 100, 1) if all_risk else 0.0,
-            "items": rows[:limit] if limit else rows}
+            "items": page_rows}
 
 
 def vendor_detail(db: Session, business_id: str, gstin: str, month: str, window: int = 6) -> dict | None:
@@ -142,7 +153,7 @@ def vendor_detail(db: Session, business_id: str, gstin: str, month: str, window:
     if not v:
         return None
     series = []
-    for m in months_window(month, window):
+    for m in trend_months(available_months(db, business_id), month, window):
         row = next((r for r in _vendor_rows(db, business_id, [m]) if r["gstin"] == gstin), None)
         series.append({"month": m, "label": month_label(m), "spend": row["spend"] if row else 0, "at_risk": row["at_risk"] if row else 0,
                        "blocked": row["blocked"] if row else 0, "matched_pct": row["matched_pct"] if row else None,
@@ -251,8 +262,8 @@ def insights(db: Session, business_id: str, month: str) -> list[dict]:
     series = trends(db, business_id, month, 6)
     if not series:
         return out
-    cur = series[-1]
-    prev = series[-2] if len(series) > 1 else None
+    cur = next((x for x in series if x["month"] == month), series[-1])
+    prev = next((x for x in series if x["month"] == prev_month(month)), None)
     v = vendors(db, business_id, month, window=1, limit=0)
     if cur["at_risk"] > 0:
         pct = round(cur["at_risk"] / cur["eligible"] * 100, 1) if cur["eligible"] else 0

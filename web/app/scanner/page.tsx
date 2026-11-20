@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { clsx } from "clsx";
 import { Camera, CheckCircle2, CircleAlert, FileText, Loader2, ScanLine, Sparkles, Trash2, UploadCloud, XCircle } from "lucide-react";
-import { Card, ErrorBox, LayerChip, Pill, Skeleton, StatusDot } from "@/components/ui";
+import { Card, ErrorBox, LayerChip, Pagination, Pill, Skeleton, StatusDot, usePageSize } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { inr } from "@/lib/format";
@@ -14,7 +14,6 @@ interface Impact { warnings: string[]; invoice_id: string; month: string; match_
 type Draft = { supplier_name: string; supplier_gstin: string; invoice_no: string; invoice_date: string; taxable_value: number; igst: number; cgst: number; sgst: number; total: number; category: string };
 
 const STEPS = [["Upload", "File reaches the API"], ["Read (OCR)", "Gemini or local parser reads the invoice"], ["Structure fields", "Fields and confidence"], ["Validate (code)", "Plain-code checks, no model"], ["Confirm", "You approve before saving"]];
-const sampleHint = (n: string) => n.includes("matches") || n.includes("resolves") ? "Resolves an entry that is in GSTR-2B but missing in your books" : n.includes("wrong_total") ? "Total does not add up: the checks should catch it" : "New invoice that is not in GSTR-2B: it will show as at risk";
 const toDraft = (f: ScanFields): Draft => ({ supplier_name: f.supplier_name ?? "", supplier_gstin: f.supplier_gstin ?? "", invoice_no: f.invoice_no ?? "", invoice_date: f.invoice_date ?? "", taxable_value: f.taxable_value, igst: f.igst, cgst: f.cgst, sgst: f.sgst, total: f.total, category: f.category ?? "General purchase" });
 
 function Field({ label, k, d, set, conf, type = "text", readOnly }: { label: string; k: keyof Draft; d: Draft; set: (k: keyof Draft, v: string) => void; conf?: number; type?: string; readOnly?: boolean }) {
@@ -40,7 +39,10 @@ export default function ScannerPage() {
   const [drag, setDrag] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const cam = useRef<HTMLInputElement>(null);
-  const samples = useApi<{ name: string; size_kb: number }[]>("/scans/samples", {}, { withMonth: false });
+  const samples = useApi<{ name: string; title: string; description: string }[]>("/scans/samples", {}, { withMonth: false });
+  const [sample, setSample] = useState("");
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentSize, setRecentSize] = usePageSize("scans");
   const recent = useApi<Scan[]>("/scans", {}, { withMonth: false });
 
   const begin = () => { setBusy(true); setError(null); setScan(null); setDraft(null); setImpact(null); setStep(0); };
@@ -136,10 +138,18 @@ export default function ScannerPage() {
             <input ref={input} type="file" accept="application/pdf,image/*" hidden onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
             <input ref={cam} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button className="btn btn-ghost w-full justify-center mt-3 sm:hidden" onClick={() => cam.current?.click()}><Camera size={16} /> Use the camera</button>
-            <div className="mt-5"><p className="text-xs font-semibold uppercase tracking-wide text-ink-500 mb-2">Or try a sample scan</p>
-              {!samples.data ? <Skeleton className="h-24" /> : <ul className="space-y-2">{samples.data.map((s) => (
-                <li key={s.name}><button disabled={busy} onClick={() => onSample(s.name)} className="w-full flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-left hover:border-brand-500/50 hover:bg-slate-50 disabled:opacity-50">
-                  <FileText size={18} className="mt-0.5 text-brand-600" /><span className="min-w-0"><span className="block text-sm font-medium truncate">{s.name}</span><span className="block text-xs text-ink-500">{sampleHint(s.name)}</span></span></button></li>))}</ul>}
+            <div className="mt-5">
+              <label className="text-xs font-semibold uppercase tracking-wide text-ink-500" htmlFor="sample">Or try a sample</label>
+              {!samples.data ? <Skeleton className="mt-2 h-10" /> : (
+                <div className="mt-2 flex gap-2">
+                  <select id="sample" className="input" value={sample} onChange={(e) => setSample(e.target.value)} disabled={busy}>
+                    <option value="">Choose a sample invoice...</option>
+                    {samples.data.map((s) => <option key={s.name} value={s.name}>{s.title}</option>)}
+                  </select>
+                  <button className="btn btn-primary" disabled={busy || !sample} onClick={() => onSample(sample)}>Scan</button>
+                </div>
+              )}
+              {sample && samples.data && <p className="mt-2 text-xs text-ink-500">{samples.data.find((s) => s.name === sample)?.description}</p>}
             </div>
           </Card>
         </div>
@@ -208,13 +218,13 @@ export default function ScannerPage() {
       <Card title="Recent scans">
         {!recent.data ? <Skeleton className="h-20" /> : (
           <div className="overflow-x-auto"><table className="w-full"><thead><tr><th className="th">File</th><th className="th">Supplier</th><th className="th">Invoice</th><th className="th text-right">Taxable</th><th className="th">Engine</th><th className="th">Status</th><th className="th"></th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{recent.data.map((s) => (
+            <tbody className="divide-y divide-slate-100">{recent.data.slice((recentPage - 1) * recentSize, recentPage * recentSize).map((s) => (
               <tr key={s.id}><td className="td font-medium max-w-[220px] truncate">{s.filename}</td><td className="td">{s.fields?.supplier_name ?? "-"}</td><td className="td">{s.fields?.invoice_no ?? "-"}</td><td className="td text-right">{s.fields ? inr(s.fields.taxable_value) : "-"}</td><td className="td text-xs text-ink-500">{s.engine ?? "-"}</td>
                 <td className="td"><Pill kind={s.status === "confirmed" ? "ok" : s.status === "failed" ? "fail" : "warn"}>{s.status}</Pill></td>
                 <td className="td text-right whitespace-nowrap">
                   {s.status === "confirmed" && <button className="mr-3 text-xs font-medium text-warn-700 hover:underline" onClick={async () => { await api.post(`/scans/${s.id}/undo`); refresh(); recent.reload(); }}>Undo</button>}
                   <button className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-bad-700 hover:bg-bad-50" aria-label={`Delete ${s.filename}`} onClick={() => removeScan(s)}><Trash2 size={14} /> Delete</button></td></tr>))}
-              {!recent.data.length && <tr><td className="td text-ink-500" colSpan={7}>No scans yet.</td></tr>}</tbody></table></div>)}
+              {!recent.data.length && <tr><td className="td text-ink-500" colSpan={7}>No scans yet.</td></tr>}</tbody></table><Pagination page={recentPage} pageSize={recentSize} total={recent.data.length} onPage={setRecentPage} onPageSize={(n) => { setRecentSize(n); setRecentPage(1); }} /></div>)}
       </Card>
     </div>
   );

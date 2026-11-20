@@ -1,19 +1,20 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { clsx } from "clsx";
-import { Cpu, Database, FileText, GitCompare, Layers, LayoutDashboard, LogIn, Menu, ScanLine, ShieldCheck, Sparkles, Store } from "lucide-react";
+import { Cpu, Database, FileText, GitCompare, Layers, LayoutDashboard, LogIn, Menu, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
 import { useApp } from "@/lib/app-context";
+import { pendingRequests, watchPending } from "@/lib/api";
 import { DEMO_USERS, useAuth } from "@/lib/auth";
-import { ErrorBox, Skeleton } from "@/components/ui";
+import { ErrorBox, PageLoader, Skeleton } from "@/components/ui";
 import ChatWidget from "@/components/ChatWidget";
+import InsightsPopup from "@/components/InsightsPopup";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
   { href: "/scanner/", label: "Invoice scanner", icon: ScanLine },
   { href: "/reconciliation/", label: "Reconciliation", icon: GitCompare },
-  { href: "/vendors/", label: "Vendors", icon: Store },
   { href: "/draft/", label: "GSTR-3B draft", icon: FileText },
   { href: "/pipeline/", label: "Processing layers", icon: Layers },
 ];
@@ -33,6 +34,18 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { month, months, setMonth, me, status, loading, error, refresh } = useApp();
   const auth = useAuth();
   const [open, setOpen] = useState(false);
+  // Keep the loader up until every request of this page (and month) has finished, not only the first one.
+  const [settled, setSettled] = useState(false);
+  const loadKey = `${path}|${month}`;
+  useEffect(() => {
+    setSettled(false);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = (n: number) => { clearTimeout(timer); if (n === 0) timer = setTimeout(() => setSettled(true), 400); };
+    const stop = watchPending(check);
+    check(pendingRequests());
+    const cap = setTimeout(() => setSettled(true), 90000);  // never hide the page forever
+    return () => { stop(); clearTimeout(timer); clearTimeout(cap); };
+  }, [loadKey]);
   const current = NAV.find((n) => (n.href === "/" ? path === "/" : path.startsWith(n.href.replace(/\/$/, ""))));
 
   if (auth.mode === "firebase" && auth.ready && !auth.uid) {
@@ -86,10 +99,11 @@ export default function Shell({ children }: { children: ReactNode }) {
           <button className="lg:hidden p-2 rounded-lg hover:bg-slate-100" onClick={() => setOpen(true)} aria-label="Menu"><Menu size={20} /></button>
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold text-ink-900">{current?.label ?? "GST CashPilot"}</h1>
-            <p className="truncate text-xs text-ink-500">{me ? `${me.legal_name} · ${me.gstin}` : "Loading business..."}</p>
+            <p className="truncate text-xs text-ink-500">{me ? `${me.legal_name} · ${me.gstin || "GSTIN comes from your GSTR-2B"}` : "Loading business..."}</p>
           </div>
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            <span className="chip hidden md:inline-flex bg-warn-50 text-warn-700"><ShieldCheck size={12} /> Draft only · nothing is filed</span>
+            <span className="chip hidden lg:inline-flex bg-warn-50 text-warn-700"><ShieldCheck size={12} /> Draft only · nothing is filed</span>
+            {months.length > 0 && <InsightsPopup />}
             <select className="input !w-auto !py-1.5 font-medium" value={month ?? ""} onChange={(e) => setMonth(e.target.value)} aria-label="Month">
               {months.map((m) => <option key={m.month} value={m.month}>{m.label}</option>)}
               {!months.length && <option>No data</option>}
@@ -101,10 +115,15 @@ export default function Shell({ children }: { children: ReactNode }) {
             ) : <button className="btn btn-ghost" onClick={auth.signOut}>Sign out</button>}
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 lg:px-8 max-w-[1500px] w-full mx-auto">
-          {error ? <ErrorBox message={error} onRetry={refresh} /> : loading ? <Skeleton className="h-64" /> : !months.length ? (
-            <div className="card p-10 text-center"><p className="font-medium">No data for this business yet.</p><p className="text-sm text-ink-500 mt-1">Open “Processing layers” and upload a purchase register, GSTR-2B and sales summary.</p><Link href="/pipeline/" className="btn btn-primary mt-4 inline-flex">Upload data</Link></div>
-          ) : children}
+        <main className="flex-1 px-4 pt-6 pb-28 lg:px-8 max-w-[1500px] w-full mx-auto">
+          {error ? <ErrorBox message={error} onRetry={refresh} /> : loading || !me ? <PageLoader /> : !months.length && !path.startsWith("/pipeline") ? (
+            <div className="card p-10 text-center"><p className="font-medium">Your workspace is empty.</p><p className="text-sm text-ink-500 mt-1">Upload your purchase register, GSTR-2B and sales summary. Everything here is built from your own files.</p><Link href="/pipeline/" className="btn btn-primary mt-4 inline-flex">Upload data</Link></div>
+          ) : (
+            <>
+              {!settled && <PageLoader label="Loading your data" />}
+              <div className={settled ? undefined : "hidden"}>{children}</div>
+            </>
+          )}
         </main>
       </div>
       {open && <div className="fixed inset-0 z-30 bg-slate-900/30 lg:hidden" onClick={() => setOpen(false)} />}

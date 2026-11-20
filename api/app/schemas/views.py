@@ -97,6 +97,8 @@ class VendorList(BaseModel):
     window: int
     months: list[str]
     total_vendors: int
+    total_matching: int = 0
+    offset: int = 0
     shown: int
     total_at_risk: float
     top3_share: float

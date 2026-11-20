@@ -32,15 +32,33 @@ Tests: `cd api && source .venv/bin/activate && python -m pytest -q` (18 tests).
 
 | Page | What it does |
 | --- | --- |
-| Overview | KPI grid (total purchase cost first), trend charts (Spend, Cash & tax, ITC mix, Match quality), ITC composition, section cards, flexible top vendors (sort, window, top N, risk filter, search), generated insights, Ask CashPilot (ADK), processing-layer strip |
+| Overview | KPI grid (total purchase cost first), trend charts (Spend, Cash & tax, ITC mix, Match quality), ITC composition, section cards, vendors table on the Overview (order, period, risk filter, search; 5, 10, 15 or 20 rows per page), generated insights, Ask CashPilot (ADK), processing-layer strip |
 | Invoice scanner | Upload or drop a PDF/photo, see the original, extracted fields with confidence, plain-code checks, confirm, and the effect on your cash payable |
 | Reconciliation | Section by section (matched, amount mismatch, missing in 2B, missing in books) with filters; a drawer per item with books vs GSTR-2B, the RAG rule, and the decision trace through the layers |
-| Vendors | Same flexible vendor view, with a six month trend drawer per vendor |
 | GSTR-3B draft | Tables 3.1, 4 and 6, Case A (eligible only) and Case B (eligible + at risk), PDF download |
 | Ask CashPilot (floating chat, every page) | Type or speak a question (nine Indian languages). The browser turns speech into text, the API understands it with plain code (vendor, status, match type, amount, month, invoice number, cash payable) and answers from saved results, with result rows that open the detail panels. Open questions go to the Google ADK agents. Read-only |
 | Processing layers | Six layers with status, counts, timing, engine and what each one feeds; run again; upload the three monthly files |
 
 Nothing is hard coded in the UI. Every number comes from the API, which computes it from the database. The October 2026 month is loaded from the files in `api/app/data/sample/` (38 matched, 5 amount mismatch, 7 missing in 2B, 3 missing in books; cash payable ₹1,76,642.50 safe and ₹1,45,000 if at-risk is claimed). May to September are generated fixtures in the same file formats and go through the same intake code.
+
+## Voice (Gemini Live) and Vertex AI
+
+- **Gemini Live voice assistant.** In the floating chat, the mic opens a real-time voice session: the browser streams the microphone to `WS /api/v1/live`, the API relays it to Gemini Live (`GEMINI_LIVE_MODEL`, default `gemini-3.8-live`), and the spoken reply plays back as it arrives. The assistant answers in the language you speak. For data questions it calls a tool that runs the same exact, read-only search as the typed chat, so it never invents numbers. Without Gemini, the mic falls back to the browser's speech recognition.
+- **Vertex AI backend.** `GENAI_BACKEND=vertex` sends Gemini and the ADK agents through Vertex AI in your Google Cloud project (set `GOOGLE_CLOUD_PROJECT`, or `VERTEX_API_KEY` for express mode). Needs billing, the Vertex AI API enabled, and `gcloud auth application-default login`.
+- **Vertex AI Search for the GST rules.** `RAG_BACKEND=vertex_search` runs the rule search on a Vertex AI Search data store instead of the local embeddings, and falls back to local if it fails. Create the data store once with `python scripts/vertex_search_setup.py --project YOUR_PROJECT`.
+
+## AlloyDB (connected)
+
+The API runs on AlloyDB for PostgreSQL when `DATABASE_URL` is a PostgreSQL address, and on local SQLite when it is not set.
+
+```bash
+cd api
+python scripts/alloydb_setup.py --admin-url "postgresql+psycopg://postgres:PW@HOST/postgres?sslmode=require" --app-password APP_PW --rls
+# then in api/.env:
+DATABASE_URL=postgresql+psycopg://cashpilot_app:APP_PW@HOST/postgres?sslmode=require
+```
+
+The script creates the tables, the restricted role `cashpilot_app` and row level security. The API connects as that role, and `set_tenant` sets the business per transaction. Your public IP must be in the instance's authorized networks (`gcloud alloydb instances update ... --authorized-external-networks=IP/32`). Delete the cluster when you are done to stop the charge: `gcloud alloydb clusters delete cashpilot --region asia-south1 --force`.
 
 ## Backend: MVC
 

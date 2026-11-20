@@ -28,10 +28,23 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY")
     )
-    gemini_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-flash-lite-latest"
     gemini_embed_model: str = "gemini-embedding-001"
+    gemini_live_model: str = "gemini-3.8-live"  # Gemini Live (voice assistant)
+    gemini_live_voice: str = "Puck"
     # read PDFs that have a clean text layer locally (instant, no Gemini quota). Photos always go to Gemini.
     ocr_prefer_local_for_text_pdf: bool = True
+
+    # Google backend for Gemini: "developer" = Google AI Studio key, "vertex" = Vertex AI in your Google Cloud project (uses the credits)
+    genai_backend: str = "developer"
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "global"
+    vertex_api_key: str | None = None  # Vertex AI express mode key; leave empty to use Application Default Credentials
+
+    # Rule search: "local" (embeddings in the database) or "vertex_search" (Vertex AI Search data store)
+    rag_backend: str = "local"
+    vertex_search_data_store: str = "gst-rules"
+    vertex_search_location: str = "global"
 
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
@@ -45,6 +58,8 @@ class Settings(BaseSettings):
 
     @property
     def gemini_enabled(self) -> bool:
+        if self.genai_backend == "vertex":
+            return bool(self.vertex_api_key or self.google_cloud_project)
         return bool(self.gemini_api_key)
 
 

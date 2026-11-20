@@ -13,9 +13,9 @@ from reportlab.pdfgen import canvas
 from sqlalchemy.orm import Session
 
 from app.core.config import BASE_DIR, get_settings
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import set_tenant, Base, SessionLocal, engine
 from app.models import Business, PurchaseInvoice
-from app.seed.generator import BUYER, generate_month
+from app.seed.generator import BUYER, generate_month, personalize_october, user_profile
 from app.services import ingest, pipeline, rag
 from app.services.util import clean_invoice_no
 
@@ -145,16 +145,23 @@ def seed(db: Session, uid: str | None = None, reset: bool = False) -> dict:
     Base.metadata.create_all(engine)
     rules = rag.ensure_rules_loaded(db)
     biz = get_or_create_business(db, uid or s.demo_owner_uid)
+    set_tenant(db, biz.id)
     if db.query(PurchaseInvoice).filter_by(business_id=biz.id).count():
         return {"seeded": False, "rules": rules}
+    owner_uid = uid or s.demo_owner_uid
+    # the built-in demo owner keeps the fixed fixtures (the tests and the documents quote them); every other account gets its own numbers
+    prof = None if owner_uid == s.demo_owner_uid else user_profile(owner_uid)
     for i, m in enumerate(EARLIER_MONTHS):
-        files = generate_month(m, seed=100 + i, growth=0.8 + i * 0.05)
+        files = generate_month(m, seed=(100 + i) if not prof else prof["seed"] + i, growth=(0.8 + i * 0.05) * (prof["scale"] if prof else 1), vendors=prof["vendors"] if prof else None)
         ingest.ingest_purchase_register(db, biz, files["register"], "register.csv")
         ingest.ingest_gstr2b(db, biz, files["gstr2b"], "gstr2b.xlsx")
         ingest.ingest_sales_summary(db, biz, files["sales"], "sales.csv")
-    ingest.ingest_purchase_register(db, biz, (SAMPLE_DIR / "purchase_register_oct2026.csv").read_bytes(), "purchase_register_oct2026.csv")
-    ingest.ingest_gstr2b(db, biz, (SAMPLE_DIR / "GSTR-2B_oct2026_dummy.xlsx").read_bytes(), "GSTR-2B_oct2026_dummy.xlsx")
-    ingest.ingest_sales_summary(db, biz, (SAMPLE_DIR / "sales_summary_oct2026.csv").read_bytes(), "sales_summary_oct2026.csv")
+    reg, g2b, sales = ((SAMPLE_DIR / n).read_bytes() for n in ("purchase_register_oct2026.csv", "GSTR-2B_oct2026_dummy.xlsx", "sales_summary_oct2026.csv"))
+    if prof:
+        reg, g2b, sales = personalize_october(reg, g2b, sales, prof)
+    ingest.ingest_purchase_register(db, biz, reg, "purchase_register_oct2026.csv")
+    ingest.ingest_gstr2b(db, biz, g2b, "GSTR-2B_oct2026_dummy.xlsx")
+    ingest.ingest_sales_summary(db, biz, sales, "sales_summary_oct2026.csv")
     for m in [*EARLIER_MONTHS, "2026-10"]:
         pipeline.run_pipeline(db, biz.id, m)
     make_sample_scans()

@@ -69,3 +69,34 @@ def test_other_language_needs_gemini_but_does_not_crash(client):
 def test_suggestions_are_built_from_the_data(client):
     r = client.get("/api/v1/voice/suggestions", params={"month": "2026-10"}, headers=H)
     assert r.status_code == 200 and any("Kalyan Logistics" in s for s in r.json())
+
+
+def test_greeting_is_answered_locally_with_example_questions(client):
+    r = ask(client, "hello")
+    assert r["intent"] == "help" and r["results"]["type"] == "help" and len(r["results"]["items"]) >= 3
+    assert ask(client, "what can you do")["intent"] == "help"
+    assert ask(client, "hello, which vendors block my credit")["intent"] == "top_vendors"  # a greeting plus a real question is still a question
+
+
+def test_top_vendor_by_purchase_is_ranked_by_spend_not_risk(client):
+    r = ask(client, "tell me the top most vendor I have purchased")
+    assert r["intent"] == "top_vendors_by_purchase" and r["results"]["metric"] == "spend"
+    spends = [v["spend"] for v in r["results"]["items"]]
+    assert spends == sorted(spends, reverse=True) and "purchases" in r["answer"]
+    assert ask(client, "which vendors are blocking my credit")["results"]["metric"] == "at_risk"
+
+
+def test_buyer_questions_get_an_honest_scope_answer(client):
+    r = ask(client, "can you just tell me who is the buyer from me")
+    assert r["intent"] == "customers_scope" and "GSTR-1" in r["answer"] and "buyer on every purchase invoice" in r["answer"]
+    assert ask(client, "what is my gstin")["intent"] == "about_business"
+
+
+def test_copilot_fallback_never_crashes_and_matches_the_chat_numbers(client):
+    for q in ("hello", "tell me something random about the weather", "who is the buyer"):
+        r = client.post("/api/v1/copilot/ask", json={"question": q, "month": "2026-10"}, headers=H)
+        assert r.status_code == 200, (q, r.text)
+    cash = client.post("/api/v1/copilot/ask", json={"question": "what is my cash payable", "month": "2026-10"}, headers=H).json()["answer"]
+    chat = ask(client, "what is my cash payable")["answer"]
+    assert cash == chat  # one engine, one answer
+    assert "could not match" in client.post("/api/v1/copilot/ask", json={"question": "weather today", "month": "2026-10"}, headers=H).json()["answer"]

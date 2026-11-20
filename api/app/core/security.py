@@ -16,6 +16,28 @@ class CurrentUser:
     uid: str
     email: str | None = None
     name: str | None = None
+    demo: bool = False  # True only for the built-in demo accounts (X-Demo-User); they get sample data, real Google sign-ins start empty
+
+
+_CERT_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _google_request():
+    """A Request that gives up after 4 s and keeps Google's signing keys for an hour, so a slow network cannot stall every call."""
+    import time
+    from google.auth.transport import requests as grequests
+
+    class _Cached(grequests.Request):
+        def __call__(self, url, method="GET", body=None, headers=None, timeout=4, **kwargs):
+            hit = _CERT_CACHE.get(url)
+            if hit and time.time() - hit[0] < 3600:
+                return hit[1]
+            res = super().__call__(url, method=method, body=body, headers=headers, timeout=min(timeout, 4), **kwargs)
+            if method == "GET" and getattr(res, "status", 0) == 200:
+                _CERT_CACHE[url] = (time.time(), res)
+            return res
+
+    return _Cached()
 
 
 def get_current_user(authorization: str | None = Header(default=None), x_demo_user: str | None = Header(default=None)) -> CurrentUser:
@@ -26,30 +48,19 @@ def get_current_user(authorization: str | None = Header(default=None), x_demo_us
             raise HTTPException(401, "Missing Firebase ID token")
         if not s.firebase_project_id:
             raise HTTPException(500, "FIREBASE_PROJECT_ID is not configured")
-        from google.auth.transport import requests as grequests
         from google.oauth2 import id_token
         try:
             token = authorization.split(" ", 1)[1]  # type: ignore[union-attr]
-            claims = id_token.verify_firebase_token(token, grequests.Request(), audience=s.firebase_project_id)
+            claims = id_token.verify_firebase_token(token, _google_request(), audience=s.firebase_project_id)
         except Exception as exc:  # noqa: BLE001
-            # If Google certs cannot be fetched due to network isolation/offline dev, extract claims from token payload
-            import base64
-            import json
-            try:
-                parts = token.split(".")
-                if len(parts) >= 2:
-                    padding = "=" * (4 - len(parts[1]) % 4)
-                    payload_bytes = base64.urlsafe_b64decode(parts[1] + padding)
-                    claims = json.loads(payload_bytes)
-                    if (claims.get("aud") == s.firebase_project_id or claims.get("iss", "").endswith(s.firebase_project_id)) and "sub" in claims:
-                        return CurrentUser(uid=claims["sub"], email=claims.get("email"), name=claims.get("name"))
-            except Exception:
-                pass
-            raise HTTPException(401, f"Invalid Firebase token: {exc}") from exc
+            from google.auth.exceptions import TransportError
+            if isinstance(exc, TransportError):
+                raise HTTPException(503, "Could not reach Google to verify your sign-in. Try again.") from exc
+            raise HTTPException(401, "Could not verify your sign-in. Sign in again and retry.") from exc
         if not claims:
             raise HTTPException(401, "Invalid Firebase token")
         return CurrentUser(uid=claims["sub"], email=claims.get("email"), name=claims.get("name"))
-    return CurrentUser(uid=(x_demo_user or s.demo_owner_uid).strip()[:64], name="Demo user")
+    return CurrentUser(uid=(x_demo_user or s.demo_owner_uid).strip()[:64], name="Demo user", demo=True)
 
 
 def get_business(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> Business:
@@ -57,12 +68,14 @@ def get_business(user: CurrentUser = Depends(get_current_user), db: Session = De
     if not b:
         from app.seed.generator import BUYER
         from app.seed.load import seed
-        b = Business(owner_uid=user.uid, gstin=BUYER, legal_name=(user.name or user.email or "Demo Traders Pvt Ltd")[:100])
+        b = Business(owner_uid=user.uid, gstin=BUYER if user.demo else "", legal_name=(user.name or user.email or "My business")[:100])
         db.add(b)
         db.commit()
-        try:
-            seed(db, uid=user.uid)
-        except Exception:
-            pass
+        set_tenant(db, b.id)
+        if user.demo:  # a real user starts with a blank workspace and uploads their own files
+            try:
+                seed(db, uid=user.uid)
+            except Exception:
+                pass
     set_tenant(db, b.id)
     return b

@@ -3,31 +3,51 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { Keyboard, MessageCircle, Mic, MicOff, Send, Sparkles, Volume2, VolumeX, X } from "lucide-react";
 import { ChatResults, FilterChips, VoiceAnswer } from "@/components/chat/VoiceResults";
+import Markdown from "@/components/chat/Markdown";
 import ItemDrawer from "@/components/reconciliation/ItemDrawer";
 import VendorDrawer from "@/components/dashboard/VendorDrawer";
-import { api } from "@/lib/api";
+import { api, wsAuthQuery } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
+import { LiveMessage, LiveState, LiveVoice, liveSupported } from "@/lib/live";
 import { LANGS, canSpeak, speak, stopSpeaking, useSpeechRecognition } from "@/lib/speech";
 
-interface Msg { role: "user" | "agent" | "error"; text: string; voice?: VoiceAnswer; agent?: string; spoken?: boolean }
+interface Msg { id: string; role: "user" | "agent" | "error"; text: string; voice?: VoiceAnswer; agent?: string; live?: boolean }
+const uid = () => Math.random().toString(36).slice(2, 10);
 
-/** Floating chat: type or speak. Data questions are answered from your saved results (exact); open questions go to the Google ADK agents. */
+function Bars({ state }: { state: LiveState }) {
+  return (
+    <span className="flex h-5 items-end gap-[3px]" aria-hidden>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span key={i} className={clsx("w-[3px] rounded-full", state === "speaking" ? "bg-brand-600" : "bg-ok-500", state === "connecting" ? "h-1.5" : "animate-pulse")}
+          style={{ height: state === "connecting" ? 6 : 6 + ((i * 7 + 5) % 14), animationDelay: `${i * 110}ms` }} />
+      ))}
+    </span>
+  );
+}
+
+/** Floating chat. Type or talk. Talking uses Gemini Live (real-time voice, any Indian language) when Gemini is on, otherwise the browser's speech recognition.
+    Data questions are answered from your saved results; open questions go to the Google ADK agents. */
 export default function ChatWidget() {
-  const { month, months, refresh } = useApp();
+  const { month, months, refresh, status } = useApp();
   const label = months.find((m) => m.month === month)?.label ?? "this month";
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [lang, setLang] = useState("en-IN");
   const [voiceReplies, setVoiceReplies] = useState(true);
   const [suggest, setSuggest] = useState<string[]>([]);
   const [openMatch, setOpenMatch] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
+  const [liveState, setLiveState] = useState<LiveState>("idle");
   const end = useRef<HTMLDivElement>(null);
+  const live = useRef<LiveVoice | null>(null);
+  const liveUser = useRef<string | null>(null);
+  const liveAssist = useRef<string | null>(null);
+  const useLive = !!status?.gemini_configured && liveSupported();
 
   useEffect(() => { try { setLang(localStorage.getItem("cashpilot.voiceLang") || "en-IN"); setVoiceReplies(localStorage.getItem("cashpilot.voiceReplies") !== "off"); } catch { /* ignore */ } }, []);
-  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [msgs, busy, open]);
+  useEffect(() => { end.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [msgs, busy, open, liveState]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") { stopSpeaking(); setOpen(false); } };
     window.addEventListener("keydown", h);
@@ -35,33 +55,79 @@ export default function ChatWidget() {
   }, []);
   useEffect(() => {
     if (!open || !month) return;
-    api.get<string[]>("/voice/suggestions", { month }).then((s) => setSuggest(s.slice(0, 4))).catch(() => setSuggest([]));
+    api.get<string[]>("/voice/suggestions", { month }).then((s) => setSuggest(s.slice(0, 3))).catch(() => setSuggest([]));
   }, [open, month]);
+  useEffect(() => () => { live.current?.stop(); }, []);
 
+  const patch = (id: string, fn: (m: Msg) => Msg) => setMsgs((all) => all.map((m) => (m.id === id ? fn(m) : m)));
+
+  /* ---------- typed / browser-speech questions ---------- */
   const send = useCallback(async (question: string, viaVoice = false) => {
     const text = question.trim();
     if (text.length < 2 || busy) return;
-    setQ(""); setBusy(true); setMsgs((m) => [...m, { role: "user", text }]);
+    setQ("");
+    if (live.current && (liveState === "listening" || liveState === "speaking")) {
+      live.current.sendText(text);
+      setMsgs((m) => [...m, { id: uid(), role: "user", text }]);
+      return;
+    }
+    setBusy("Searching your data..."); setMsgs((m) => [...m, { id: uid(), role: "user", text }]);
     try {
       const v = await api.post<VoiceAnswer>("/voice/query", { text, lang, month }, { month });
       if (v.intent !== "unknown") {
-        setMsgs((m) => [...m, { role: "agent", text: v.answer, voice: v, spoken: viaVoice }]);
+        setMsgs((m) => [...m, { id: uid(), role: "agent", text: v.answer, voice: v }]);
         if (viaVoice && voiceReplies && canSpeak()) speak(v.spoken, v.spoken_language === "en" ? "en-IN" : lang);
       } else {
-        // not a data lookup: ask the Google ADK agents
+        setBusy("Asking the Google ADK agents...");
         const r = await api.post<{ answer: string; agent: string }>("/copilot/ask", { question: v.english ?? text, month });
-        setMsgs((m) => [...m, { role: "agent", text: r.answer, agent: r.agent }]);
-        if (viaVoice && voiceReplies && canSpeak()) speak(r.answer, "en-IN");
+        setMsgs((m) => [...m, { id: uid(), role: "agent", text: r.answer, agent: r.agent }]);
+        if (viaVoice && voiceReplies && canSpeak()) speak(r.answer.replace(/[*_`#]/g, ""), "en-IN");
       }
-    } catch (e) { setMsgs((m) => [...m, { role: "error", text: (e as Error).message }]); }
-    finally { setBusy(false); }
-  }, [busy, lang, month, voiceReplies]);
+    } catch (e) { setMsgs((m) => [...m, { id: uid(), role: "error", text: (e as Error).message }]); }
+    finally { setBusy(null); }
+  }, [busy, lang, liveState, month, voiceReplies]);
 
+  /* ---------- Gemini Live ---------- */
+  const onLive = useCallback((m: LiveMessage) => {
+    if (m.type === "user_transcript") {
+      if (liveAssist.current) { liveAssist.current = null; liveUser.current = null; }
+      if (!liveUser.current) { const id = uid(); liveUser.current = id; setMsgs((all) => [...all, { id, role: "user", text: m.text.trimStart(), live: true }]); }
+      else patch(liveUser.current, (x) => ({ ...x, text: x.text + m.text }));
+    } else if (m.type === "assistant_transcript") {
+      if (!liveAssist.current) { const id = uid(); liveAssist.current = id; setMsgs((all) => [...all, { id, role: "agent", text: m.text.trimStart(), live: true, agent: "Gemini Live" }]); }
+      else patch(liveAssist.current, (x) => ({ ...x, text: x.text + m.text }));
+    } else if (m.type === "results") {
+      const data = m.data as VoiceAnswer;
+      if (!liveAssist.current) { const id = uid(); liveAssist.current = id; setMsgs((all) => [...all, { id, role: "agent", text: "", voice: data, live: true, agent: "Gemini Live" }]); }
+      else patch(liveAssist.current, (x) => ({ ...x, voice: data }));
+    } else if (m.type === "error") {
+      setMsgs((all) => [...all, { id: uid(), role: "error", text: m.message }]);
+      live.current?.stop();
+    }
+  }, []);
+
+  async function startLive() {
+    stopSpeaking(); liveUser.current = null; liveAssist.current = null;
+    const lv = new LiveVoice(onLive, setLiveState);
+    live.current = lv;
+    try { await lv.start({ month, authQuery: await wsAuthQuery() }); }
+    catch (e) { setMsgs((all) => [...all, { id: uid(), role: "error", text: (e as Error).message }]); }
+  }
+  const stopLive = () => { live.current?.stop(); live.current = null; };
+
+  /* ---------- fallback: browser speech recognition ---------- */
   const mic = useSpeechRecognition(lang, (t) => send(t, true));
-  const toggleMic = () => { if (mic.listening) mic.stop(); else { stopSpeaking(); mic.start(); } };
+  const liveOn = liveState !== "idle";
+  const toggleMic = () => {
+    if (useLive) { if (liveOn) stopLive(); else startLive(); return; }
+    if (mic.listening) mic.stop(); else { stopSpeaking(); mic.start(); }
+  };
+  const micActive = useLive ? liveOn : mic.listening;
+  const micOk = useLive || mic.supported;
   const changeLang = (l: string) => { setLang(l); try { localStorage.setItem("cashpilot.voiceLang", l); } catch { /* ignore */ } };
   const toggleReplies = () => { stopSpeaking(); setVoiceReplies((v) => { try { localStorage.setItem("cashpilot.voiceReplies", v ? "off" : "on"); } catch { /* ignore */ } return !v; }); };
-  const placeholder = mic.listening ? (mic.interim ? `“${mic.interim}”` : "Listening...") : "Type, or tap the mic and speak";
+  const placeholder = liveOn ? "Speak, or type here" : mic.listening ? (mic.interim ? `“${mic.interim}”` : "Listening...") : "Type, or tap the mic and talk";
+  const liveText = liveState === "connecting" ? "Connecting to Gemini Live..." : liveState === "speaking" ? "CashPilot is speaking..." : "Listening. Talk in any language.";
 
   return (
     <>
@@ -70,64 +136,69 @@ export default function ChatWidget() {
           className="fixed z-[45] bottom-24 right-4 sm:right-6 w-[calc(100vw-2rem)] sm:w-[430px] max-h-[min(700px,calc(100vh-8rem))] flex flex-col rounded-2xl bg-white border border-slate-200 shadow-pop overflow-hidden">
           <header className="flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-brand-600 to-brand-700 text-white">
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/15"><Sparkles size={16} /></span>
-            <div className="min-w-0 flex-1"><p className="text-sm font-semibold leading-tight">Ask CashPilot</p><p className="text-[11px] text-white/80 leading-tight truncate">Type or speak · {label}</p></div>
-            <select value={lang} onChange={(e) => changeLang(e.target.value)} aria-label="Speaking language" className="max-w-[118px] rounded-lg border-0 bg-white/15 px-2 py-1 text-xs text-white focus:outline-none [&>option]:text-ink-900">
-              {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
-            </select>
-            <button onClick={toggleReplies} className="p-1.5 rounded-lg hover:bg-white/15" aria-label={voiceReplies ? "Turn spoken replies off" : "Turn spoken replies on"} aria-pressed={voiceReplies} title="Read replies aloud when you speak">
-              {voiceReplies ? <Volume2 size={16} /> : <VolumeX size={16} />}
-            </button>
-            <button onClick={() => { stopSpeaking(); setOpen(false); }} className="p-1.5 rounded-lg hover:bg-white/15" aria-label="Close chat"><X size={16} /></button>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight">Ask CashPilot</p>
+              <p className="text-[11px] text-white/80 leading-tight truncate">{liveOn ? <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-green-300" /> Live voice · {label}</span> : `Type or talk · ${label}`}</p>
+            </div>
+            {!useLive && <select value={lang} onChange={(e) => changeLang(e.target.value)} aria-label="Speaking language" className="max-w-[118px] rounded-lg border-0 bg-white/15 px-2 py-1 text-xs text-white focus:outline-none [&>option]:text-ink-900">{LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select>}
+            {!useLive && <button onClick={toggleReplies} className="p-1.5 rounded-lg hover:bg-white/15" aria-label={voiceReplies ? "Turn spoken replies off" : "Turn spoken replies on"} aria-pressed={voiceReplies}>{voiceReplies ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>}
+            <button onClick={() => { stopSpeaking(); stopLive(); setOpen(false); }} className="p-1.5 rounded-lg hover:bg-white/15" aria-label="Close chat"><X size={16} /></button>
           </header>
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-slate-50/60 min-h-[220px]">
             {!msgs.length && (
-              <div>
-                <p className="text-sm text-ink-700">Hi, ask about your vendors, invoices or cash payable. I answer from your saved results, so the numbers are exact.</p>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold">Hi, I'm CashPilot</p>
+                <p className="mt-1 text-sm text-ink-700">Ask about your vendors, invoices or cash payable. Answers come from your saved results, so the numbers are exact.</p>
                 <div className="mt-3 flex flex-col gap-2">
                   {(suggest.length ? suggest : [`Which vendors block my credit in ${label}?`, `What is my cash payable for ${label}?`]).map((s) => (
-                    <button key={s} onClick={() => send(s)} className="text-left rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-ink-700 hover:border-brand-500/50 hover:bg-brand-50/40">{s}</button>
+                    <button key={s} onClick={() => send(s)} className="text-left rounded-xl border border-brand-500/25 bg-brand-50/50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-50">{s}</button>
                   ))}
                 </div>
-                <p className="mt-3 text-[11px] text-ink-500">Tap the mic to speak. Your browser's speech service turns your voice into text, and CashPilot only receives the text.</p>
+                <p className="mt-3 text-[11px] text-ink-500">{useLive ? "Tap the mic to talk to Gemini Live in your own language." : "Tap the mic to speak. Your browser turns your voice into text."}</p>
               </div>
             )}
-            {msgs.map((m, i) => (
-              <div key={i} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+            {msgs.map((m) => (
+              <div key={m.id} className={clsx("flex", m.role === "user" ? "justify-end" : "justify-start")}>
                 <div className={clsx("max-w-[92%] rounded-2xl px-3.5 py-2 text-sm", m.role === "user" ? "bg-brand-600 text-white rounded-br-md whitespace-pre-wrap" : m.role === "error" ? "bg-warn-50 text-warn-700 rounded-bl-md" : "bg-white border border-slate-200 text-ink-900 rounded-bl-md")}>
-                  {m.voice && <FilterChips filters={m.voice.filters} />}
+                  {m.voice && m.voice.intent !== "help" && <FilterChips filters={m.voice.filters} />}
                   {m.voice?.english && <p className="mb-1 text-[11px] text-ink-500">Understood as: “{m.voice.english}”</p>}
-                  <p className="whitespace-pre-wrap">{m.text}</p>
-                  {m.voice && m.voice.spoken_language !== "en" && <p className="mt-1 text-[11px] text-ink-500">{m.voice.spoken}</p>}
+                  {m.role === "agent" ? (m.text ? <Markdown text={m.text} /> : null) : <p className="whitespace-pre-wrap">{m.text}</p>}
                   {m.voice?.notes.map((n) => <p key={n} className="mt-1.5 rounded-lg bg-warn-50 p-1.5 text-[11px] text-warn-700">{n}</p>)}
-                  {m.voice && <ChatResults a={m.voice} onInvoice={setOpenMatch} onVendor={setOpenVendor} />}
-                  {m.role === "agent" && (
+                  {m.voice && <ChatResults a={m.voice} onInvoice={setOpenMatch} onVendor={setOpenVendor} onAsk={(x) => send(x)} />}
+                  {m.role === "agent" && (m.voice || m.agent) && (
                     <div className="mt-1.5 flex items-center gap-2 text-[10px] text-ink-500">
-                      <span>{m.voice ? m.voice.engine : m.agent}</span>
-                      {canSpeak() && <button className="ml-auto flex items-center gap-1 hover:text-brand-700" onClick={() => { stopSpeaking(); speak(m.voice?.spoken ?? m.text, m.voice && m.voice.spoken_language !== "en" ? lang : "en-IN"); }} aria-label="Read this reply aloud"><Volume2 size={12} /> Read aloud</button>}
+                      <span>{m.live ? "Gemini Live" : m.voice ? m.voice.engine : m.agent}</span>
+                      {!m.live && canSpeak() && m.text && <button className="ml-auto flex items-center gap-1 hover:text-brand-700" onClick={() => { stopSpeaking(); speak((m.voice?.spoken ?? m.text).replace(/[*_`#]/g, ""), m.voice && m.voice.spoken_language !== "en" ? lang : "en-IN"); }} aria-label="Read this reply aloud"><Volume2 size={12} /> Read aloud</button>}
                     </div>
                   )}
                 </div>
               </div>
             ))}
-            {busy && <div className="flex"><div className="rounded-2xl rounded-bl-md bg-white border border-slate-200 px-3.5 py-2 text-sm text-ink-500 animate-pulse">Searching your data...</div></div>}
-            {mic.error && <p className="rounded-xl bg-warn-50 p-2 text-xs text-warn-700">{mic.error}</p>}
+            {busy && <div className="flex"><div className="rounded-2xl rounded-bl-md bg-white border border-slate-200 px-3.5 py-2 text-sm text-ink-500 animate-pulse">{busy}</div></div>}
+            {mic.error && !useLive && <p className="rounded-xl bg-warn-50 p-2 text-xs text-warn-700">{mic.error}</p>}
             <div ref={end} />
           </div>
 
+          {liveOn && (
+            <div className="flex items-center gap-3 border-t border-slate-100 bg-ok-50/70 px-4 py-2">
+              <Bars state={liveState} /><span className="text-xs font-medium text-ok-700">{liveText}</span>
+              <button onClick={stopLive} className="ml-auto rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-bad-700 shadow-card hover:bg-bad-50">End</button>
+            </div>
+          )}
           <form onSubmit={(e) => { e.preventDefault(); stopSpeaking(); send(q); }} className="flex items-center gap-2 border-t border-slate-100 bg-white p-3">
-            <button type="button" onClick={toggleMic} disabled={busy || !mic.supported} aria-label={mic.listening ? "Stop listening" : "Speak your question"} title={mic.supported ? "Speak" : "Voice input needs Chrome or Edge"}
-              className={clsx("grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition disabled:opacity-40 disabled:cursor-not-allowed", mic.listening ? "bg-bad-500 pulse" : "bg-gradient-to-br from-brand-500 to-brand-700 hover:scale-105")}>
-              {mic.listening ? <MicOff size={17} /> : <Mic size={17} />}
+            <button type="button" onClick={toggleMic} disabled={(!!busy && !liveOn) || !micOk} aria-label={micActive ? "Stop listening" : "Talk to CashPilot"} title={micOk ? (useLive ? "Talk (Gemini Live)" : "Speak") : "Voice input needs Chrome or Edge"}
+              className={clsx("grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition disabled:opacity-40 disabled:cursor-not-allowed", micActive ? "bg-bad-500 pulse" : "bg-gradient-to-br from-brand-500 to-brand-700 hover:scale-105")}>
+              {micActive ? <MicOff size={17} /> : <Mic size={17} />}
             </button>
             <div className="relative flex-1"><Keyboard size={14} className="absolute left-3 top-3 text-ink-300" />
               <input autoFocus className="input !pl-8 !py-2" placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} disabled={mic.listening} /></div>
-            <button className="btn btn-primary !px-3" disabled={busy || q.trim().length < 2} aria-label="Send"><Send size={15} /></button>
+            <button className="btn btn-primary !px-3" disabled={(!!busy && !liveOn) || q.trim().length < 2} aria-label="Send"><Send size={15} /></button>
           </form>
           <p className="px-4 pb-3 -mt-1 text-[10px] text-ink-500 bg-white">Read-only draft help. Nothing is filed and this is not tax advice.</p>
         </section>
       )}
-      <button onClick={() => { if (open) stopSpeaking(); setOpen((o) => !o); }} aria-label={open ? "Close chat" : "Open Ask CashPilot"}
+      <button onClick={() => { if (open) { stopSpeaking(); stopLive(); } setOpen((o) => !o); }} aria-label={open ? "Close chat" : "Open Ask CashPilot"}
         className={clsx("fixed z-[45] bottom-6 right-4 sm:right-6 flex items-center gap-2 rounded-full pl-4 pr-5 py-3 text-sm font-medium text-white shadow-pop transition hover:scale-[1.03]",
           open ? "bg-ink-700" : "bg-gradient-to-r from-brand-600 to-brand-700")}>
         {open ? <X size={18} /> : <MessageCircle size={18} />}<span className="hidden sm:inline">{open ? "Close" : "Ask CashPilot"}</span>

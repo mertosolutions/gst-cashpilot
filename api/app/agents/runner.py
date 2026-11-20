@@ -1,6 +1,7 @@
 """Runs ADK agents. Requires GEMINI_API_KEY; callers handle AgentUnavailable and fall back."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 
@@ -15,9 +16,17 @@ class AgentUnavailable(RuntimeError):
 
 def _prepare_env() -> None:
     s = get_settings()
-    if not s.gemini_api_key:
-        raise AgentUnavailable("GEMINI_API_KEY is not set, so the Google ADK agents cannot call Gemini.")
-    os.environ.setdefault("GOOGLE_API_KEY", s.gemini_api_key)
+    if not s.gemini_enabled:
+        raise AgentUnavailable("Gemini is not configured, so the Google ADK agents cannot call it.")
+    if s.genai_backend == "vertex":  # ADK then calls Gemini through Vertex AI in your Google Cloud project
+        os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "TRUE"
+        if s.vertex_api_key:
+            os.environ["GOOGLE_API_KEY"] = s.vertex_api_key
+        else:
+            os.environ["GOOGLE_CLOUD_PROJECT"] = s.google_cloud_project or ""
+            os.environ["GOOGLE_CLOUD_LOCATION"] = s.google_cloud_location
+        return
+    os.environ.setdefault("GOOGLE_API_KEY", s.gemini_api_key or "")
     os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "FALSE")
 
 
@@ -36,72 +45,19 @@ async def _run(agent, user_id: str, state: dict, parts: list) -> str:
 
 
 def _fallback_copilot_answer(question: str, business_id: str, month: str) -> str:
+    """Used when the Google ADK agents cannot answer (no Gemini, quota, timeout). It asks the same exact search engine the chat uses,
+    so the numbers can never disagree with the rest of the app. A question it does not understand gets an honest scope message."""
     from app.core.database import SessionLocal, set_tenant
-    from app.models import ItcCheck, PurchaseInvoice
-    from app.services import analytics, tax
+    from app.services import voice_search
 
-    q = question.lower()
     with SessionLocal() as db:
         set_tenant(db, business_id)
-
-        # 1. Vendors blocking credit
-        if any(w in q for w in ("vendor", "block", "who", "credit")):
-            v = analytics.vendors(db, business_id, month, window=1, sort="at_risk", limit=5)
-            items = v.get("items", [])
-            if not items:
-                return f"No vendors are currently blocking credit in {month}."
-            lines = [f"Vendors blocking the most credit in {month}:"]
-            for i, item in enumerate(items, 1):
-                lines.append(f"{i}. **{item['name']}** ({item['gstin']}): ₹{item['at_risk']:,.2f} at risk across {item['invoices']} invoice(s) — {item['matched_pct']}% matched ({item['risk_level']} risk)")
-            lines.append(f"\nTotal at-risk credit from top vendors: **₹{v.get('total_at_risk', 0):,.2f}** (Top 3 account for {v.get('top3_share', 0)}% of all blocked credit).")
-            lines.append("\n*Recommendation*: Request these vendors to file their GSTR-1 before the 11th of the month to release this credit.")
-            return "\n".join(lines)
-
-        # 2. Cash payable in both cases
-        if any(w in q for w in ("cash", "payable", "case", "how much", "pay")):
-            cp = tax.calculate_cash_payable(db, business_id, month)
-            safe = cp.get("cash_safe", 0)
-            risk = cp.get("cash_with_risk", 0)
-            diff = safe - risk
-            return (
-                f"**Cash Payable Summary for {month}:**\n\n"
-                f"• **Case A (Safe Strategy — Claiming only Eligible ITC):**\n"
-                f"  Cash Payable is **₹{safe:,.2f}** in GSTR-3B Table 6. Eliminates department notice liability.\n\n"
-                f"• **Case B (Aggressive Strategy — Claiming Eligible + At-Risk ITC):**\n"
-                f"  Cash Payable is **₹{risk:,.2f}**, saving **₹{diff:,.2f}** in immediate cash outflow.\n\n"
-                f"⚠️ *Note*: If vendors do not file by the deadline, claiming the ₹{diff:,.2f} in Case B may attract a notice under Section 73 with 18% p.a. interest."
-            )
-
-        # 3. Largest at-risk invoice
-        if any(w in q for w in ("largest", "risk", "why")):
-            chk = (
-                db.query(ItcCheck)
-                .join(PurchaseInvoice, ItcCheck.purchase_invoice_id == PurchaseInvoice.id)
-                .filter(ItcCheck.business_id == business_id, PurchaseInvoice.month == month, ItcCheck.status == "at_risk")
-                .order_by(ItcCheck.at_risk_total.desc())
-                .first()
-            )
-            if chk:
-                inv = chk.invoice
-                return (
-                    f"The largest at-risk invoice in {month} is **{inv.invoice_no}** from **{inv.vendor.name}** "
-                    f"for **₹{chk.at_risk_total:,.2f}**.\n\n"
-                    f"• **Reason:** {chk.reason}\n"
-                    f"• **Cited Rule:** {chk.citation or 'Section 16(2)(aa) of CGST Act'}\n"
-                    f"• **Action required:** Follow up with {inv.vendor.name} to upload invoice {inv.invoice_no} in GSTR-1."
-                )
-
-        # 4. General month summary fallback
-        summ = analytics.summary(db, business_id, month)
-        kpi_map = {k["key"]: k["value"] for k in summ.get("kpis", [])}
-        return (
-            f"**GST Summary for {month}:**\n"
-            f"• Total Purchase Spend: ₹{kpi_map.get('purchase_total', 0):,.2f}\n"
-            f"• Eligible ITC: ₹{kpi_map.get('eligible', 0):,.2f}\n"
-            f"• At-Risk ITC: ₹{kpi_map.get('at_risk', 0):,.2f}\n"
-            f"• Safe Cash Payable: ₹{kpi_map.get('cash_safe', 0):,.2f}\n"
-            f"• Matched Invoices: {kpi_map.get('matched', 0)} ({kpi_map.get('match_pct', 0)}% match rate)."
-        )
+        res = voice_search.answer(db, business_id, question, month, "en-IN")
+        if res["intent"] == "unknown":
+            return ("I can answer questions about your **vendors**, **invoices** (at risk, blocked, missing in GSTR-2B or in your books), "
+                    "**ITC** and **cash payable**. I could not match that question to your data, so I will not guess. "
+                    "Try one of these:\n" + "\n".join(f"- {q}" for q in voice_search.suggestions(db, business_id, month)[:3]))
+        return res["answer"]
 
 
 async def ask_copilot(question: str, business_id: str, user_id: str, month: str) -> dict:
@@ -113,7 +69,7 @@ async def ask_copilot(question: str, business_id: str, user_id: str, month: str)
         from google.genai import types
         from app.agents.definitions import build_agents
         root, _ = build_agents()
-        answer = await _run(root, user_id, {"business_id": business_id, "month": month}, [types.Part.from_text(text=question)])
+        answer = await asyncio.wait_for(_run(root, user_id, {"business_id": business_id, "month": month}, [types.Part.from_text(text=question)]), timeout=25)
         if answer and len(answer.strip()) > 5:
             return {"answer": answer, "agent": "cashpilot_root_agent (Google ADK)"}
     except Exception as exc:  # noqa: BLE001
