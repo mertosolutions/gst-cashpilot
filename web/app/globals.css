@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { background: #f6f8fc; color: #1f2937; }
+body { font-feature-settings: "tnum" 1; }
+@keyframes pulseRing { 0% { box-shadow: 0 0 0 0 rgba(66,133,244,.5); } 100% { box-shadow: 0 0 0 10px rgba(66,133,244,0); } }
+.pulse { animation: pulseRing 1.2s ease-out infinite; }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.skeleton { background: linear-gradient(90deg,#eef2f7 25%,#f8fafc 37%,#eef2f7 63%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: .5rem; }
+
+@layer components {
+  .card { @apply bg-white rounded-2xl border border-slate-200/70 shadow-card; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium; }
+  .btn { @apply inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply bg-brand-600 text-white hover:bg-brand-700; }
+  .btn-ghost { @apply bg-white border border-slate-200 text-ink-700 hover:bg-slate-50; }
+  .input { @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500; }
+  .th { @apply text-left text-[11px] font-semibold uppercase tracking-wide text-ink-500 px-3 py-2 whitespace-nowrap; }
+  .td { @apply px-3 py-2.5 text-sm; }
+}

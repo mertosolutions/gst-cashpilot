@@ -1,0 +1,164 @@
+{
+ "note": "Simplified paraphrases for the prototype. A CA must verify the exact current wording before real use.",
+ "passages": [
+  {
+   "id": "s16_1",
+   "citation": "Section 16(1), CGST Act, 2017",
+   "topic": "Eligibility to take ITC",
+   "body": "Every registered person is entitled to take credit of input tax charged on any supply of goods or services that is used or intended to be used in the course or furtherance of business, subject to the conditions and restrictions of the Act.",
+   "tags": [
+    "eligible"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_2_a",
+   "citation": "Section 16(2)(a), CGST Act, 2017",
+   "topic": "Tax invoice needed",
+   "body": "ITC can be taken only if the recipient holds a tax invoice, debit note or other prescribed tax-paying document issued by a registered supplier.",
+   "tags": [
+    "eligible"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_2_aa",
+   "citation": "Section 16(2)(aa), CGST Act, 2017",
+   "topic": "Invoice must appear in GSTR-2B",
+   "body": "ITC can be taken only if the details of the invoice or debit note have been furnished by the supplier in the statement of outward supplies (GSTR-1) and have been communicated to the recipient. This communication is the auto-drafted ITC statement, GSTR-2B. An invoice that does not appear in GSTR-2B, or appears with a lower amount, is not confirmed for credit.",
+   "tags": [
+    "not_in_2b",
+    "amount_above_2b",
+    "eligible"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_2_b",
+   "citation": "Section 16(2)(b), CGST Act, 2017",
+   "topic": "Goods or services must be received",
+   "body": "ITC can be taken only after the recipient has received the goods or services (or the goods are delivered to a person on the recipient's direction).",
+   "tags": [
+    "eligible"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_2_c",
+   "citation": "Section 16(2)(c), CGST Act, 2017",
+   "topic": "Supplier must pay the tax",
+   "body": "ITC can be taken only if the tax charged on the supply has actually been paid to the Government by the supplier, in cash or by using input tax credit. If the supplier does not deposit the tax, the credit of the buyer is at risk.",
+   "tags": [
+    "not_in_2b"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_2_d",
+   "citation": "Section 16(2)(d), CGST Act, 2017",
+   "topic": "Recipient must file the return",
+   "body": "ITC can be taken only if the recipient has furnished the return under Section 39 (GSTR-3B) for the period.",
+   "tags": [
+    "eligible"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s16_4",
+   "citation": "Section 16(4), CGST Act, 2017",
+   "topic": "Time limit to claim ITC",
+   "body": "A registered person cannot take ITC on an invoice or debit note after the thirtieth day of November following the end of the financial year to which the invoice pertains, or the date of furnishing the annual return, whichever is earlier. After this date the credit is lost.",
+   "tags": [
+    "too_old"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_a",
+   "citation": "Section 17(5)(a), CGST Act, 2017",
+   "topic": "Blocked credit: motor vehicles",
+   "body": "ITC is blocked on motor vehicles used for transporting persons with a seating capacity of up to thirteen persons (including the driver). Exceptions apply where the vehicles are used for further supply of such vehicles, transportation of passengers, or training in driving.",
+   "tags": [
+    "blocked_category",
+    "motor_vehicle"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_b_i",
+   "citation": "Section 17(5)(b)(i), CGST Act, 2017",
+   "topic": "Blocked credit: food, catering, health services",
+   "body": "ITC is blocked on food and beverages, outdoor catering, beauty treatment, health services, cosmetic and plastic surgery, except where the employer is obliged by law to provide them to employees or they are used for making an outward supply of the same category.",
+   "tags": [
+    "blocked_category",
+    "food"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_b_ii",
+   "citation": "Section 17(5)(b)(ii), CGST Act, 2017",
+   "topic": "Blocked credit: club membership",
+   "body": "ITC is blocked on membership of a club, health and fitness centre.",
+   "tags": [
+    "blocked_category",
+    "club"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_b_iii",
+   "citation": "Section 17(5)(b)(iii), CGST Act, 2017",
+   "topic": "Blocked credit: employee travel benefits",
+   "body": "ITC is blocked on travel benefits extended to employees on vacation, such as leave or home travel concession.",
+   "tags": [
+    "blocked_category",
+    "travel"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_c_d",
+   "citation": "Section 17(5)(c) and (d), CGST Act, 2017",
+   "topic": "Blocked credit: works contract and construction",
+   "body": "ITC is blocked on works contract services and on goods or services received for construction of an immovable property (other than plant and machinery) on own account, even when used in the course of business.",
+   "tags": [
+    "blocked_category",
+    "construction"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_g",
+   "citation": "Section 17(5)(g), CGST Act, 2017",
+   "topic": "Blocked credit: personal consumption",
+   "body": "ITC is blocked on goods or services used for personal consumption.",
+   "tags": [
+    "blocked_category",
+    "personal"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "s17_5_h",
+   "citation": "Section 17(5)(h), CGST Act, 2017",
+   "topic": "Blocked credit: lost, gifted or free samples",
+   "body": "ITC is blocked on goods lost, stolen, destroyed, written off or disposed of by way of gift or free samples.",
+   "tags": [
+    "blocked_category",
+    "gift"
+   ],
+   "needs_ca_review": true
+  },
+  {
+   "id": "r37",
+   "citation": "Rule 37, CGST Rules, 2017",
+   "topic": "Pay the supplier within 180 days",
+   "body": "If the recipient does not pay the supplier the value of the supply and the tax within 180 days from the date of the invoice, the ITC taken must be added back to output tax with interest. The credit can be taken again once the payment is made.",
+   "tags": [
+    "payment_180"
+   ],
+   "needs_ca_review": true
+  }
+ ]
+}

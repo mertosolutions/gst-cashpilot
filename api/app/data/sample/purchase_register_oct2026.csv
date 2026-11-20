@@ -1,0 +1,51 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,igst,cgst,sgst,category
+MET-0001,2026-10-07,27CCCCC2222C1Z7,Metro Office Supplies,4000.0,0.0,240.0,240.0,General purchase
+INV/002,2026-10-28,27DDDDD3333D1Z8,Kalyan Logistics,56000.0,0.0,3360.0,3360.0,General purchase
+SHR-0003,2026-10-17,27EEEEE4444E1Z9,Shree Electricals,27500.0,0.0,2475.0,2475.0,General purchase
+INV/004,2026-10-03,27FFFFF5555F1Z0,Mumbai Print House,4000.0,0.0,100.0,100.0,General purchase
+APE-0005,2026-10-18,27GGGGG6666G1Z1,Apex IT Services,8200.0,0.0,738.0,738.0,General purchase
+INV/006,2026-10-14,29HHHHH7777H1Z2,Bangalore Components Ltd,4000.0,200.0,0.0,0.0,General purchase
+DEC-0007,2026-10-20,29IIIII8888I1Z3,Deccan Steel Traders,12000.0,1440.0,0.0,0.0,General purchase
+INV/008,2026-10-11,24JJJJJ9999J1Z4,Gujarat Chemicals,6500.0,1170.0,0.0,0.0,General purchase
+RAJ-0009,2026-10-26,27KKKKK1010K1Z5,Raj Stationers,6500.0,0.0,390.0,390.0,General purchase
+INV/010,2026-10-23,33LLLLL2020L1Z6,Chennai Fasteners,4000.0,480.0,0.0,0.0,General purchase
+CIT-0011,2026-10-02,27MMMMM3030M1Z7,City Auto Dealers,56000.0,0.0,1400.0,1400.0,General purchase
+INV/012,2026-10-22,27BBBBB1111B1Z6,Sunrise Packaging Pvt Ltd,21000.0,0.0,525.0,525.0,General purchase
+MET-0013,2026-10-05,27CCCCC2222C1Z7,Metro Office Supplies,12000.0,0.0,300.0,300.0,General purchase
+INV/014,2026-10-26,27MMMMM3030M1Z7,City Auto Dealers,15500.0,0.0,930.0,930.0,Motor car (blocked credit)
+CIT-0015,2026-10-23,27MMMMM3030M1Z7,City Auto Dealers,56000.0,0.0,5040.0,5040.0,Motor car (blocked credit)
+INV/016,2026-10-17,27FFFFF5555F1Z0,Mumbai Print House,27500.0,0.0,1650.0,1650.0,General purchase
+APE-0017,2026-10-13,27GGGGG6666G1Z1,Apex IT Services,34000.0,0.0,3060.0,3060.0,General purchase
+INV/018,2026-10-05,29HHHHH7777H1Z2,Bangalore Components Ltd,4000.0,200.0,0.0,0.0,General purchase
+DEC-0019,2026-10-17,29IIIII8888I1Z3,Deccan Steel Traders,56000.0,2800.0,0.0,0.0,General purchase
+INV/020,2026-10-27,24JJJJJ9999J1Z4,Gujarat Chemicals,6500.0,1170.0,0.0,0.0,General purchase
+RAJ-0021,2026-10-19,27KKKKK1010K1Z5,Raj Stationers,34000.0,0.0,850.0,850.0,General purchase
+INV/022,2026-10-02,33LLLLL2020L1Z6,Chennai Fasteners,8200.0,1476.0,0.0,0.0,General purchase
+CIT-0023,2026-10-02,27MMMMM3030M1Z7,City Auto Dealers,4000.0,0.0,240.0,240.0,General purchase
+INV/024,2026-10-06,27BBBBB1111B1Z6,Sunrise Packaging Pvt Ltd,15500.0,0.0,930.0,930.0,General purchase
+MET-0025,2026-10-06,27CCCCC2222C1Z7,Metro Office Supplies,6500.0,0.0,390.0,390.0,General purchase
+INV/026,2026-10-20,27DDDDD3333D1Z8,Kalyan Logistics,6500.0,0.0,162.5,162.5,General purchase
+SHR-0027,2026-10-28,27EEEEE4444E1Z9,Shree Electricals,4000.0,0.0,100.0,100.0,General purchase
+INV/028,2026-10-01,27FFFFF5555F1Z0,Mumbai Print House,27500.0,0.0,2475.0,2475.0,General purchase
+APE-0029,2026-10-27,27GGGGG6666G1Z1,Apex IT Services,15500.0,0.0,930.0,930.0,General purchase
+INV/030,2026-10-21,29HHHHH7777H1Z2,Bangalore Components Ltd,21000.0,3780.0,0.0,0.0,General purchase
+DEC-0031,2026-10-04,29IIIII8888I1Z3,Deccan Steel Traders,27500.0,1375.0,0.0,0.0,General purchase
+INV/032,2026-10-15,24JJJJJ9999J1Z4,Gujarat Chemicals,6500.0,325.0,0.0,0.0,General purchase
+RAJ-0033,2026-10-08,27KKKKK1010K1Z5,Raj Stationers,12000.0,0.0,720.0,720.0,General purchase
+INV/034,2026-10-17,33LLLLL2020L1Z6,Chennai Fasteners,8200.0,1476.0,0.0,0.0,General purchase
+CIT-0035,2026-10-20,27MMMMM3030M1Z7,City Auto Dealers,27500.0,0.0,1650.0,1650.0,General purchase
+INV/036,2026-10-03,27BBBBB1111B1Z6,Sunrise Packaging Pvt Ltd,21000.0,0.0,1890.0,1890.0,General purchase
+MET-0037,2026-10-03,27CCCCC2222C1Z7,Metro Office Supplies,42000.0,0.0,3780.0,3780.0,General purchase
+INV/038,2026-10-02,27DDDDD3333D1Z8,Kalyan Logistics,8200.0,0.0,738.0,738.0,General purchase
+SHR-0039,2026-10-13,27EEEEE4444E1Z9,Shree Electricals,4000.0,0.0,100.0,100.0,General purchase
+INV/040,2026-10-03,27FFFFF5555F1Z0,Mumbai Print House,12000.0,0.0,720.0,720.0,General purchase
+APE-0041,2026-10-11,27GGGGG6666G1Z1,Apex IT Services,12000.0,0.0,720.0,720.0,General purchase
+INV/042,2026-10-07,29HHHHH7777H1Z2,Bangalore Components Ltd,27500.0,3300.0,0.0,0.0,General purchase
+DEC-0043,2026-10-01,29IIIII8888I1Z3,Deccan Steel Traders,34000.0,1700.0,0.0,0.0,General purchase
+INV/044,2026-10-04,24JJJJJ9999J1Z4,Gujarat Chemicals,42000.0,7560.0,0.0,0.0,General purchase
+RAJ-0045,2026-10-07,27KKKKK1010K1Z5,Raj Stationers,6500.0,0.0,162.5,162.5,General purchase
+INV/046,2026-10-18,33LLLLL2020L1Z6,Chennai Fasteners,6500.0,325.0,0.0,0.0,General purchase
+CIT-0047,2026-10-20,27MMMMM3030M1Z7,City Auto Dealers,8200.0,0.0,205.0,205.0,General purchase
+INV/048,2026-10-26,27BBBBB1111B1Z6,Sunrise Packaging Pvt Ltd,42000.0,0.0,1050.0,1050.0,General purchase
+MET-0049,2026-10-02,27CCCCC2222C1Z7,Metro Office Supplies,42000.0,0.0,1050.0,1050.0,General purchase
+INV/050,2026-10-18,27DDDDD3333D1Z8,Kalyan Logistics,27500.0,0.0,1650.0,1650.0,General purchase

@@ -1,0 +1,73 @@
+{
+ "rule_labels": {
+  "eligible": "Matched and available in GSTR-2B",
+  "not_in_2b": "Not in GSTR-2B",
+  "blocked_category": "Blocked category",
+  "too_old": "Past the claim time limit",
+  "amount_above_2b": "Books amount is above GSTR-2B",
+  "no_rule_found": "No rule found",
+  "itc_not_available": "GSTR-2B shows ITC not available"
+ },
+ "retrieval_queries": {
+  "eligible": "conditions to take input tax credit tax invoice received goods or services tax paid return furnished",
+  "not_in_2b": "invoice not furnished by supplier communicated to recipient GSTR-2B not confirmed supplier has not paid tax",
+  "amount_above_2b": "invoice details furnished by supplier communicated to recipient GSTR-2B lower amount",
+  "too_old": "time limit take input tax credit 30th November following financial year annual return",
+  "blocked_category": "blocked credit input tax credit not available",
+  "itc_not_available": "invoice not furnished by supplier communicated to recipient GSTR-2B not confirmed supplier has not paid tax"
+ },
+ "blocked_categories": [
+  {
+   "keywords": [
+    "motor car",
+    "motor vehicle",
+    "car ",
+    "vehicle"
+   ],
+   "tag": "motor_vehicle"
+  },
+  {
+   "keywords": [
+    "food",
+    "beverage",
+    "catering",
+    "canteen"
+   ],
+   "tag": "food"
+  },
+  {
+   "keywords": [
+    "club",
+    "gym",
+    "fitness"
+   ],
+   "tag": "club"
+  },
+  {
+   "keywords": [
+    "leave travel",
+    "home travel",
+    "vacation"
+   ],
+   "tag": "travel"
+  },
+  {
+   "keywords": [
+    "construction",
+    "works contract",
+    "building"
+   ],
+   "tag": "construction"
+  },
+  {
+   "keywords": [
+    "personal",
+    "gift",
+    "free sample"
+   ],
+   "tag": "personal"
+  }
+ ],
+ "min_rule_score": 0.05,
+ "top_k": 3
+}
