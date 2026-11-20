@@ -103,7 +103,11 @@ With no `GEMINI_API_KEY` everything runs locally:
 
 Set `GEMINI_API_KEY` (from Google AI Studio) in `api/.env` to switch on Gemini reading, Gemini embeddings (re-embedded automatically) and the ADK agents. The header shows which engines are active.
 
-## Deploy
+## Deploy (automatic)
+
+Every push to `main` runs `.github/workflows/deploy.yml`: tests, then the API goes to **Cloud Run** (`cashpilot-api`, asia-south1, private link to AlloyDB, secrets from Secret Manager), then the web app is built against that API and deployed to **Firebase Hosting**. GitHub signs in to Google Cloud with Workload Identity Federation, so no keys are stored. Live site: https://gstcashcopilot.web.app
+
+## Deploy by hand
 
 **Web, Firebase Hosting**
 
