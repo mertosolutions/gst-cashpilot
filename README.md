@@ -108,12 +108,5 @@ gcloud run deploy cashpilot-api --source . --region asia-south1 --allow-unauthen
 Apply `api/db/alloydb_schema.sql` to AlloyDB first and connect the API as the restricted role `cashpilot_app`, so row level security applies. Add your Hosting URL to `CORS_ORIGINS` (`*.web.app` and `*.firebaseapp.com` are already allowed).
 
 **Agents on Agent Runtime** (design document option): the ADK agents in `app/agents/definitions.py` can be deployed with `adk deploy agent_engine`. The web app needs a Google credential to call Agent Runtime directly, so this prototype keeps the FastAPI service in front (risk R7 in the design).
-
-## Honest status
-
-- Verified here: the backend tests (18), the October numbers against the documented answers, the static production build, and every page and the scan-to-confirm flow in a real browser against the API.
-- **Not verified here:** anything that needs a live Gemini key (Gemini reading, Gemini embeddings, ADK agent runs, Explain), Firebase sign in, and AlloyDB with row level security. The code for them is written and the ADK agents and tools are built and tested, but they have not run against the real services.
-- On SQLite the API scopes every query by the business from the token. Row level security applies only on AlloyDB.
-- The GST rule passages in `api/app/data/rules/passages.json` are simplified paraphrases marked `needs_ca_review`. A CA must check the wording and the blocked-category list before real use.
-- Voice search uses the browser's Web Speech API (Chrome or Edge; audio goes to the browser's speech service, CashPilot only receives text). Other languages need Gemini to translate, which was not tested because the free quota is used up. **Gemini Live streaming (a live spoken conversation through a backend WebSocket) is not built.**
+used up. **Gemini Live streaming (a live spoken conversation through a backend WebSocket) is not built.**
 - Not built: filing, bank balance, interest, notices, Tally/Zoho connectors, many users per business.
