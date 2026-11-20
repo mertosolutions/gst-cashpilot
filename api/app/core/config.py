@@ -28,12 +28,17 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY")
     )
-    gemini_model: str = "gemini-flash-lite-latest"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_embed_model: str = "gemini-embedding-001"
-    gemini_live_model: str = "gemini-3.8-live"  # Gemini Live (voice assistant)
+    gemini_live_model: str = "gemini-3.8-live"  # Gemini Live (multilingual voice assistant)
     gemini_live_voice: str = "Puck"
     # read PDFs that have a clean text layer locally (instant, no Gemini quota). Photos always go to Gemini.
     ocr_prefer_local_for_text_pdf: bool = True
+
+    # Google Cloud Document AI (Invoice Parser)
+    document_ai_enabled: bool = True
+    document_ai_processor_id: str = "cea8d9f3fa0c169f"  # processor "cashpilot-invoice-parser" (Invoice Parser) in gstcashcopilot, us
+    document_ai_location: str = "us"
 
     # Google backend for Gemini: "developer" = Google AI Studio key, "vertex" = Vertex AI in your Google Cloud project (uses the credits)
     genai_backend: str = "developer"
@@ -41,8 +46,8 @@ class Settings(BaseSettings):
     google_cloud_location: str = "global"
     vertex_api_key: str | None = None  # Vertex AI express mode key; leave empty to use Application Default Credentials
 
-    # Rule search: "local" (embeddings in the database) or "vertex_search" (Vertex AI Search data store)
-    rag_backend: str = "local"
+    # Rule search: "vertex_search" (Vertex AI Search / GCP Managed RAG Engine) or "local" (database vector index)
+    rag_backend: str = "vertex_search"
     vertex_search_data_store: str = "gst-rules"
     vertex_search_location: str = "global"
 

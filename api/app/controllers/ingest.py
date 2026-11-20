@@ -38,8 +38,8 @@ def delete_all_data(db: Session = Depends(get_db), business: Business = Depends(
     files = [d.file_uri for d in db.query(Document).filter_by(business_id=business.id).all() if d.file_uri]
     counts = {}
     try:
-        from app.models import VendorNotice  # vendor notices reference vendors, so they go first when the model exists
-        extra = (VendorNotice,)
+        from app.models import Gstr3bVersion, VendorNotice  # vendor notices reference vendors, so they go first when the models exist
+        extra = (VendorNotice, Gstr3bVersion)
     except ImportError:
         extra = ()
     for model in (*extra, ItcCheck, Match, Gstr3bDraft, PipelineRun, SalesSummary, Gstr2bEntry, PurchaseInvoice, Document, Vendor):  # children first

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { clsx } from "clsx";
-import { BookOpen, Sparkles } from "lucide-react";
+import { BookOpen, CheckCircle2, Mail, Send, Sparkles } from "lucide-react";
 import { Drawer, ErrorBox, ItcBadge, LayerChip, Pill, Skeleton, StatusDot } from "@/components/ui";
 import { api } from "@/lib/api";
 import { inr } from "@/lib/format";
@@ -24,17 +24,43 @@ export default function ItemDrawer({ matchId, onClose, onChanged }: { matchId: s
   const { data, error, reload } = useApi<Detail>(matchId ? `/reconciliation/${matchId}` : null, {}, { withMonth: false });
   const [busy, setBusy] = useState(false);
   const [aiErr, setAiErr] = useState<string | null>(null);
+  const [noticeSent, setNoticeSent] = useState<string | null>(null);
+  const [noticeBusy, setNoticeBusy] = useState(false);
+
   async function explain() {
     if (!matchId) return;
     setBusy(true); setAiErr(null);
     try { await api.post(`/reconciliation/${matchId}/explain`); reload(); onChanged(); } catch (e) { setAiErr((e as Error).message); } finally { setBusy(false); }
   }
+
+  async function sendNotice() {
+    if (!data?.vendor.gstin) return;
+    setNoticeBusy(true);
+    try {
+      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number } }>(`/vendors/${data.vendor.gstin}/notice`, {});
+      setNoticeSent(`Notice prepared and saved for ${data.vendor.name}. Nothing was emailed.`);
+      setTimeout(() => setNoticeSent(null), 5000);
+    } catch {
+      alert("Failed to send compliance notice");
+    } finally {
+      setNoticeBusy(false);
+    }
+  }
+
   const d = data?.decision;
+  const isAtRisk = d && d.at_risk > 0;
   return (
     <Drawer open={!!matchId} onClose={onClose} width="max-w-3xl"
       title={data ? <span className="flex items-center gap-2">{data.vendor.name} <Pill kind={data.match.type} /></span> : "Item"} subtitle={data ? `${data.vendor.gstin}${data.category ? " · " + data.category : ""}` : ""}>
       {error ? <ErrorBox message={error} /> : !data ? <Skeleton className="h-96" /> : (
         <div className="space-y-6">
+          {noticeSent && (
+            <div className="flex items-center gap-2 rounded-xl bg-ok-50 border border-ok-200 p-3 text-xs text-ok-800">
+              <CheckCircle2 size={16} className="text-ok-600" />
+              <span>{noticeSent}</span>
+            </div>
+          )}
+
           {d && (
             <section className={clsx("rounded-2xl p-4 border", d.status === "eligible" ? "bg-ok-50 border-ok-500/30" : d.status === "at_risk" ? "bg-warn-50 border-warn-500/30" : "bg-bad-50 border-bad-500/30")}>
               <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2"><ItcBadge status={d.status} partial={d.status === "eligible" && d.at_risk > 0} /><span className="text-sm font-semibold">{d.rule_label}</span></div><LayerChip name="ITC decision" /></div>
@@ -44,6 +70,19 @@ export default function ItemDrawer({ matchId, onClose, onChanged }: { matchId: s
                   <div key={l as string} className="rounded-xl bg-white/70 py-2"><div className="text-ink-500">{l as string}</div><div className={clsx("text-base font-semibold", c as string)}>{inr(v as number, { decimals: 2 })}</div></div>))}
               </div>
               {d.claim_deadline && <p className="mt-2 text-[11px] text-ink-500">Last date to claim this invoice (Section 16(4)): {new Date(d.claim_deadline).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>}
+              {isAtRisk && (
+                <div className="mt-3 pt-3 border-t border-warn-200/60 flex items-center justify-between">
+                  <span className="text-xs text-warn-800 font-medium">Missing in GSTR-2B · Supplier has not filed return</span>
+                  <button
+                    onClick={sendNotice}
+                    disabled={noticeBusy}
+                    className="btn btn-secondary !py-1 text-xs flex items-center gap-1.5 border-warn-300 bg-white hover:bg-warn-50 text-warn-900"
+                  >
+                    <Send size={12} className="text-warn-600" />
+                    <span>{noticeBusy ? "Sending..." : "Notify Defaulter Supplier"}</span>
+                  </button>
+                </div>
+              )}
             </section>
           )}
 

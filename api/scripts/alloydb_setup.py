@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-TENANT_TABLES = ["vendors", "documents", "purchase_invoices", "gstr2b_entries", "sales_summary", "matches", "itc_checks", "gstr3b_drafts", "pipeline_runs"]
+TENANT_TABLES = ["vendors", "documents", "purchase_invoices", "gstr2b_entries", "sales_summary", "matches", "itc_checks", "gstr3b_drafts", "pipeline_runs", "vendor_notices", "gstr3b_versions"]
 
 
 def main() -> None:

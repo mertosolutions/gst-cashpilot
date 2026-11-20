@@ -28,10 +28,10 @@ def project_id() -> str:
     s = get_settings()
     if s.google_cloud_project:
         return s.google_cloud_project
-    try:
-        return _session()[1] or ""
-    except Exception:  # noqa: BLE001
-        return ""
+    import os
+    if os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        return os.environ["GOOGLE_CLOUD_PROJECT"]
+    return ""
 
 
 def data_store_path() -> str:

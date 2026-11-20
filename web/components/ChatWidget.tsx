@@ -138,7 +138,7 @@ export default function ChatWidget() {
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-white/15"><Sparkles size={16} /></span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold leading-tight">Ask CashPilot</p>
-              <p className="text-[11px] text-white/80 leading-tight truncate">{liveOn ? <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-green-300" /> Live voice · {label}</span> : `Type or talk · ${label}`}</p>
+              <p className="text-[11px] text-white/80 leading-tight truncate">{liveOn ? <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-green-300" /> Gemini Live · Multilingual (EN/HI/TA)</span> : `Google ADK Multi-Agent · ${label}`}</p>
             </div>
             {!useLive && <select value={lang} onChange={(e) => changeLang(e.target.value)} aria-label="Speaking language" className="max-w-[118px] rounded-lg border-0 bg-white/15 px-2 py-1 text-xs text-white focus:outline-none [&>option]:text-ink-900">{LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}</select>}
             {!useLive && <button onClick={toggleReplies} className="p-1.5 rounded-lg hover:bg-white/15" aria-label={voiceReplies ? "Turn spoken replies off" : "Turn spoken replies on"} aria-pressed={voiceReplies}>{voiceReplies ? <Volume2 size={16} /> : <VolumeX size={16} />}</button>}
@@ -148,14 +148,22 @@ export default function ChatWidget() {
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 bg-slate-50/60 min-h-[220px]">
             {!msgs.length && (
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-sm font-semibold">Hi, I'm CashPilot</p>
-                <p className="mt-1 text-sm text-ink-700">Ask about your vendors, invoices or cash payable. Answers come from your saved results, so the numbers are exact.</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">Hi, I'm CashPilot</p>
+                  <span className="chip bg-brand-50 text-brand-700 text-[10px]">ADK Multi-Agent</span>
+                </div>
+                <p className="mt-1 text-xs text-ink-600">Specialist agents: <strong>Tax Reconciliation</strong> · <strong>Vendor Communication</strong> · <strong>GST Legal RAG</strong>.</p>
                 <div className="mt-3 flex flex-col gap-2">
-                  {(suggest.length ? suggest : [`Which vendors block my credit in ${label}?`, `What is my cash payable for ${label}?`]).map((s) => (
-                    <button key={s} onClick={() => send(s)} className="text-left rounded-xl border border-brand-500/25 bg-brand-50/50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-50">{s}</button>
+                  {[
+                    `Which vendors block my credit in ${label}?`,
+                    `Notify defaulting vendors for ${label}`,
+                    `What is my cash payable for ${label} in both cases?`,
+                    `Why is the largest at-risk invoice blocked under GST rules?`,
+                  ].map((s) => (
+                    <button key={s} onClick={() => send(s)} className="text-left rounded-xl border border-brand-500/25 bg-brand-50/50 px-3 py-2 text-[12px] font-medium text-brand-700 hover:bg-brand-50 transition">{s}</button>
                   ))}
                 </div>
-                <p className="mt-3 text-[11px] text-ink-500">{useLive ? "Tap the mic to talk to Gemini Live in your own language." : "Tap the mic to speak. Your browser turns your voice into text."}</p>
+                <p className="mt-3 text-[11px] text-ink-500">{useLive ? "🎙️ Tap the mic to talk to Gemini Live in your own language (Tamil, Hindi, English)." : "Tap the mic to speak. Your browser turns your voice into text."}</p>
               </div>
             )}
             {msgs.map((m) => (

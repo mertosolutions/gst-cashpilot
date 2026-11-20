@@ -127,8 +127,21 @@ def extract(data: bytes, content_type: str, filename: str, business: Business) -
     notes: list[str] = []
     is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
     t = time.perf_counter()
+    # 1) Google Cloud Document AI (Invoice Parser) reads PDFs and photos. Any failure falls through to the readers below.
+    from app.services import document_ai
+    if document_ai.enabled():
+        try:
+            dmime = "application/pdf" if is_pdf else (content_type or "image/jpeg")
+            fields, conf = document_ai.extract(data, dmime, business.gstin)
+            engine = "Google Cloud Document AI (Invoice Parser)"
+            if not (fields.get("invoice_no") and fields.get("supplier_gstin") and fields.get("total")):
+                notes.append("Document AI could not read every key field, so the other readers were tried.")
+                fields, conf, engine = {}, {}, ""
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"Document AI was not used ({type(exc).__name__}); another reader was used.")
+            fields, conf, engine = {}, {}, ""
     # Fast path: a PDF with a clean text layer is read locally in milliseconds (no Gemini call, no quota used).
-    if is_pdf:
+    if is_pdf and not fields:
         try:
             text = _pdf_text(data)
         except Exception:  # noqa: BLE001

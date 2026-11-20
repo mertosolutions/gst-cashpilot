@@ -53,6 +53,7 @@ def get_current_user(authorization: str | None = Header(default=None), x_demo_us
             token = authorization.split(" ", 1)[1]  # type: ignore[union-attr]
             claims = id_token.verify_firebase_token(token, _google_request(), audience=s.firebase_project_id)
         except Exception as exc:  # noqa: BLE001
+            # The token signature must always be verified. Never trust an unverified token's contents.
             from google.auth.exceptions import TransportError
             if isinstance(exc, TransportError):
                 raise HTTPException(503, "Could not reach Google to verify your sign-in. Try again.") from exc
@@ -64,6 +65,7 @@ def get_current_user(authorization: str | None = Header(default=None), x_demo_us
 
 
 def get_business(user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> Business:
+    s = get_settings()
     b = db.query(Business).filter_by(owner_uid=user.uid).first()
     if not b:
         from app.seed.generator import BUYER

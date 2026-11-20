@@ -8,6 +8,8 @@ os.environ["AUTO_SEED"] = "true"
 os.environ["AUTH_MODE"] = "dev"
 os.environ["GEMINI_API_KEY"] = ""  # tests run offline even if api/.env has a key
 os.environ["GOOGLE_API_KEY"] = ""
+os.environ["DOCUMENT_AI_ENABLED"] = "false"  # tests never call Google Cloud
+os.environ["RAG_BACKEND"] = "local"
 
 import pytest
 from fastapi.testclient import TestClient

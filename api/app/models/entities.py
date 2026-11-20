@@ -180,6 +180,38 @@ class Gstr3bDraft(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Gstr3bVersion(Base):
+    """Version history for GSTR-3B draft filings, tracking adjustments made via Copilot or manual CA edits."""
+    __tablename__ = "gstr3b_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    month: Mapped[str] = mapped_column(String(7), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    label: Mapped[str] = mapped_column(String(100), default="v1 (Initial Auto-Draft)")
+    change_summary: Mapped[str] = mapped_column(String(300), default="Auto-drafted from reconciled GSTR-2B and purchase register")
+    created_by: Mapped[str] = mapped_column(String(100), default="Auto-draft L6")
+    tables: Mapped[dict] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class VendorNotice(Base):
+    """Email notices triggered to defaulting vendors whose invoices are missing in GSTR-2B or have amount mismatches."""
+    __tablename__ = "vendor_notices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_id)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    vendor_id: Mapped[str] = mapped_column(ForeignKey("vendors.id"), index=True)
+    month: Mapped[str] = mapped_column(String(7), index=True)
+    recipient_email: Mapped[str] = mapped_column(String(200))
+    subject: Mapped[str] = mapped_column(String(300))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="sent")  # sent | delivered | pending
+    invoice_count: Mapped[int] = mapped_column(Integer, default=0)
+    at_risk_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    vendor: Mapped["Vendor"] = relationship(lazy="joined")
+
+
 class PipelineRun(Base):
     """One run of the processing layers for a month. Powers the processing-layer indicators in the UI."""
     __tablename__ = "pipeline_runs"

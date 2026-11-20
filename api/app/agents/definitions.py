@@ -43,28 +43,47 @@ def build_agents():
     model = get_settings().gemini_model
     extraction = LlmAgent(
         name="extraction_agent", model=model,
-        description="Reads a scanned GST invoice (PDF or photo) into structured fields.",
-        instruction=("You read Indian GST tax invoices. Extract the fields exactly as printed. Use null or 0 when a value is not visible. "
-                     "Never invent values. Give a confidence between 0 and 1 for every field."),
+        description="Reads scanned GST invoices using Google Cloud Document AI & Gemini Multimodal OCR schema.",
+        instruction=("You read Indian GST tax invoices with high precision. Extract supplier GSTIN, invoice number, date, "
+                     "taxable value, CGST, SGST, IGST, and category. Give an accurate confidence score for each field."),
         output_schema=InvoiceFields, disallow_transfer_to_parent=True, disallow_transfer_to_peers=True)
-    eligibility = LlmAgent(
-        name="eligibility_agent", model=model,
-        description="Answers questions about input tax credit: matching with GSTR-2B, the ITC status of an invoice and the GST rule behind it.",
-        instruction=("You explain ITC decisions in simple words for a business owner. Always use the tools; never calculate amounts yourself. "
-                     "Quote the rule citation returned by the tool. If a tool says 'no rule found', say so and suggest asking a CA. "
-                     "The month is given in session state as {month}. Use YYYY-MM when calling tools."),
-        tools=[tools.run_matching, tools.get_decision, tools.search_rules])
-    draft = LlmAgent(
-        name="draft_agent", model=model,
-        description="Answers questions about vendors blocking credit, cash payable and the GSTR-3B draft.",
-        instruction=("You explain the cash payable and the vendors who block credit. Always use the tools; the numbers come from the tools only. "
-                     "Show both cash cases (A: eligible only, B: eligible plus at risk) when asked about cash. Nothing is filed: this is a draft for a CA to review. "
+
+    reconciliation = LlmAgent(
+        name="tax_reconciliation_agent", model=model,
+        description="Answers questions about GSTR-2B matching, eligible input tax credit (ITC), at-risk amounts, and cash payable.",
+        instruction=("You explain reconciliation and tax cash outflow in simple, precise numbers for the business owner. "
+                     "Always use the tools: run_matching, get_decision, calculate_cash. "
+                     "Present cash payable in both scenarios (Case A: safe eligible credit only; Case B: eligible plus at-risk credit). "
                      "The month is given in session state as {month}."),
-        tools=[tools.vendor_summary, tools.calculate_cash])
+        tools=[tools.run_matching, tools.get_decision, tools.calculate_cash])
+
+    vendor_comm = LlmAgent(
+        name="vendor_communication_agent", model=model,
+        description="Identifies defaulter suppliers blocking credit, lists vendor risks, and triggers automated email compliance notices.",
+        instruction=("You specialize in supplier compliance and resolving ITC blocks. "
+                     "Use vendor_summary and list_defaulter_vendors to show high-risk suppliers. "
+                     "When asked to remind, notify, or email a defaulter vendor, call trigger_vendor_defaulter_notice with the vendor's GSTIN and month. "
+                     "The month is given in session state as {month}."),
+        tools=[tools.vendor_summary, tools.list_defaulter_vendors, tools.trigger_vendor_defaulter_notice])
+
+    legal_rag = LlmAgent(
+        name="gst_legal_rag_agent", model=model,
+        description="Answers GST statutory legal questions by querying Vertex AI Search / GCP Managed RAG Engine over Indian GST Acts and Rules.",
+        instruction=("You provide authoritative statutory explanations for GST compliance decisions. "
+                     "Always search legal passages with search_rules. "
+                     "Always cite the exact Section (e.g. Section 16(2)(aa), Section 17(5)) or Rule (Rule 36(4), Rule 88C) returned by the tool. "
+                     "Remind the user that this is a pre-filing draft assistant and final filing should be reviewed by a Chartered Accountant."),
+        tools=[tools.search_rules])
+
     root = LlmAgent(
         name="cashpilot_root_agent", model=model,
-        description="Root agent of GST CashPilot.",
-        instruction=("You are GST CashPilot, a pre-filing GST assistant. Send ITC and invoice questions to eligibility_agent and vendor, "
-                     "cash and GSTR-3B questions to draft_agent. You never file returns and you never give final tax advice."),
-        sub_agents=[eligibility, draft])
+        description="Root Multi-Agent Orchestrator of GST CashPilot built on Google ADK.",
+        instruction=("You are the GST CashPilot Multi-Agent Orchestrator. "
+                     "Route questions to the right specialist agent: "
+                     "- Tax, credit, 2B matches, cash payable -> tax_reconciliation_agent\n"
+                     "- Defaulter suppliers, risk ranking, email notices -> vendor_communication_agent\n"
+                     "- GST legal acts, Section 16, Section 17(5) blocked credit -> gst_legal_rag_agent\n"
+                     "Always coordinate the response clearly and concisely."),
+        sub_agents=[reconciliation, vendor_comm, legal_rag])
+
     return root, extraction

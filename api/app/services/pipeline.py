@@ -72,7 +72,7 @@ def run_pipeline(db: Session, business_id: str, month: str) -> PipelineRun:
         decisions = itc.prepare(db, business_id, month)
         t_r = time.perf_counter()
         retrieved = rag.search_many(db, [d["query"] for d in decisions])
-        stages.append(_stage(3, "ok", (time.perf_counter() - t_r) * 1000, len(decisions), sum(1 for r in retrieved if r), rules["engine"] + " + hybrid tag boost",
+        stages.append(_stage(3, "ok", (time.perf_counter() - t_r) * 1000, len(decisions), sum(1 for r in retrieved if r), rag.backend_name() + " + hybrid tag boost",
                              {"passages_in_index": rules["passages"], "queries": len(decisions), "top_k": 3}, []))
         # L5 decide
         t = time.perf_counter()

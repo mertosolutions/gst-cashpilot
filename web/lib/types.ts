@@ -30,8 +30,19 @@ export interface Scan { id: string; filename: string; status: string; engine: st
 export interface SystemStatus { api: string; database: string; auth_mode: string; gemini_configured: boolean; gemini_model: string; embedding_engine: string; adk_version: string; rules_indexed: number; tenant_isolation: string }
 export interface Me { uid: string; business_id: string; legal_name: string; gstin: string; auth_mode: string }
 export type Heads = { igst: number; cgst: number; sgst: number };
+export interface DraftVersion {
+  version_number: number;
+  label: string;
+  change_summary: string;
+  created_by: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface Draft {
   month: string; business: { name: string; gstin: string }; disclaimer: string;
+  current_version?: number;
+  versions?: DraftVersion[];
   tables: {
     table_3_1: { title: string; taxable_value: number; tax: Heads };
     table_4: { title: string; rows: { label: string; tax: Heads }[] };

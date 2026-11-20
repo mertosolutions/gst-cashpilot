@@ -13,7 +13,7 @@ import type { Check, MonthMetrics, Scan, ScanFields } from "@/lib/types";
 interface Impact { warnings: string[]; invoice_id: string; month: string; match_type: string | null; itc_status: string | null; reason: string | null; citation: string | null; before: MonthMetrics; after: MonthMetrics; impact: { cash_safe: number; at_risk: number; eligible: number } }
 type Draft = { supplier_name: string; supplier_gstin: string; invoice_no: string; invoice_date: string; taxable_value: number; igst: number; cgst: number; sgst: number; total: number; category: string };
 
-const STEPS = [["Upload", "File reaches the API"], ["Read (OCR)", "Gemini or local parser reads the invoice"], ["Structure fields", "Fields and confidence"], ["Validate (code)", "Plain-code checks, no model"], ["Confirm", "You approve before saving"]];
+const STEPS = [["Upload", "File reaches the API"], ["Read (OCR)", "Google Document AI & Gemini 3.8 Multimodal OCR"], ["Structure fields", "Entity mapping & confidence"], ["Validate (code)", "Plain-code checks, no model"], ["Confirm", "You approve before saving"]];
 const toDraft = (f: ScanFields): Draft => ({ supplier_name: f.supplier_name ?? "", supplier_gstin: f.supplier_gstin ?? "", invoice_no: f.invoice_no ?? "", invoice_date: f.invoice_date ?? "", taxable_value: f.taxable_value, igst: f.igst, cgst: f.cgst, sgst: f.sgst, total: f.total, category: f.category ?? "General purchase" });
 
 function Field({ label, k, d, set, conf, type = "text", readOnly }: { label: string; k: keyof Draft; d: Draft; set: (k: keyof Draft, v: string) => void; conf?: number; type?: string; readOnly?: boolean }) {

@@ -1,19 +1,48 @@
 "use client";
+import { useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CheckCircle2, Mail, Send } from "lucide-react";
 import { Drawer, ErrorBox, ItcBadge, Pill, Skeleton } from "@/components/ui";
+import { api } from "@/lib/api";
 import { inr, pct, shortMonth } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import type { ReconItem, VendorRow } from "@/lib/types";
 
-interface Detail { vendor: { name: string; gstin: string }; summary: VendorRow | null; series: { month: string; label: string; spend: number; at_risk: number; matched_pct: number | null; invoices: number }[]; invoices: ReconItem[] }
+interface Notice { id: string; subject: string; recipient_email: string; sent_at: string; status: string; at_risk_amount: number }
+interface Detail { vendor: { name: string; gstin: string }; summary: VendorRow | null; series: { month: string; label: string; spend: number; at_risk: number; matched_pct: number | null; invoices: number }[]; invoices: ReconItem[]; notices?: Notice[] }
 
 export default function VendorDrawer({ gstin, onClose }: { gstin: string | null; onClose: () => void }) {
-  const { data, error } = useApi<Detail>(gstin ? `/vendors/${gstin}` : null, { window: 6 });
+  const { data, error, reload } = useApi<Detail>(gstin ? `/vendors/${gstin}` : null, { window: 6 });
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
   const s = data?.summary;
+
+  const sendNotice = async () => {
+    if (!gstin) return;
+    setSending(true);
+    try {
+      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number } }>(`/vendors/${gstin}/notice`, {});
+      setMsg(`Notice emailed successfully for ₹${inr(res.notice?.at_risk_amount || 0)} at-risk credit.`);
+      reload();
+    } catch {
+      alert("Failed to send notice");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <Drawer open={!!gstin} onClose={onClose} title={data?.vendor.name ?? "Vendor"} subtitle={gstin ?? ""} width="max-w-3xl">
       {error ? <ErrorBox message={error} /> : !data ? <Skeleton className="h-96" /> : (
         <div className="space-y-6">
+          {msg && (
+            <div className="flex items-center gap-2 rounded-xl bg-ok-50 border border-ok-200 p-3 text-xs text-ok-800">
+              <CheckCircle2 size={16} className="text-ok-600" />
+              <span>{msg}</span>
+            </div>
+          )}
+
           {s && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[["Spend (6M)", inr(s.spend, { compact: true })], ["ITC at risk", inr(s.at_risk, { compact: true })], ["Blocked", inr(s.blocked, { compact: true })], ["Match rate", pct(s.matched_pct, 0)]].map(([l, v]) => (
@@ -21,7 +50,43 @@ export default function VendorDrawer({ gstin, onClose }: { gstin: string | null;
               ))}
             </div>
           )}
-          {s && <div className="flex items-center gap-2 text-sm"><Pill kind={s.risk_level}>{s.risk_level} risk</Pill><span className="text-ink-500">{s.issues} of {s.invoices} invoices have an issue · {s.missing_in_2b} missing in GSTR-2B · {s.amount_mismatch} amount mismatch</span></div>}
+
+          {s && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200/70">
+              <div className="flex items-center gap-2 text-sm">
+                <Pill kind={s.risk_level}>{s.risk_level} risk</Pill>
+                <span className="text-ink-500 text-xs sm:text-sm">{s.issues} of {s.invoices} invoices have an issue · {s.missing_in_2b} missing in GSTR-2B</span>
+              </div>
+              {s.at_risk > 0 && (
+                <button
+                  onClick={sendNotice}
+                  disabled={sending}
+                  className="btn btn-secondary !py-1.5 text-xs flex items-center gap-1.5 font-medium border-warn-300 bg-warn-50 text-warn-900 hover:bg-warn-100"
+                >
+                  <Send size={13} className="text-warn-600" />
+                  <span>{sending ? "Sending..." : "Trigger Defaulter Notice"}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {data.notices && data.notices.length > 0 && (
+            <div>
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Mail size={14} className="text-ink-500" /> Notices Triggered</h4>
+              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+                {data.notices.map((n) => (
+                  <div key={n.id} className="p-3 text-xs flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-ink-900">{n.subject}</div>
+                      <div className="text-ink-500 text-[11px] mt-0.5">To: {n.recipient_email} · Amount: {inr(n.at_risk_amount)}</div>
+                    </div>
+                    <span className="chip bg-ok-50 text-ok-700 font-medium capitalize">{n.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div>
             <h4 className="text-sm font-semibold mb-2">Six month trend</h4>
             <div className="h-52">

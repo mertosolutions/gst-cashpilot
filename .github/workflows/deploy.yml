@@ -63,7 +63,7 @@ jobs:
             --allow-unauthenticated \
             --network default --subnet default --vpc-egress private-ranges-only \
             --timeout 3600 --memory 1Gi --cpu 1 --min-instances 0 --max-instances 3 \
-            --set-env-vars "^@^AUTH_MODE=firebase@FIREBASE_PROJECT_ID=$PROJECT_ID@AUTO_SEED=false@CORS_ORIGINS=https://$PROJECT_ID.web.app,https://$PROJECT_ID.firebaseapp.com" \
+            --set-env-vars "^@^AUTH_MODE=firebase@FIREBASE_PROJECT_ID=$PROJECT_ID@AUTO_SEED=false@GOOGLE_CLOUD_PROJECT=$PROJECT_ID@RAG_BACKEND=vertex_search@CORS_ORIGINS=https://$PROJECT_ID.web.app,https://$PROJECT_ID.firebaseapp.com" \
             --set-secrets "GEMINI_API_KEY=gemini-key:latest,DATABASE_URL=database-url:latest"
       - id: url
         run: echo "url=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')" >> "$GITHUB_OUTPUT"

@@ -71,14 +71,24 @@ async def ask_copilot(question: str, business_id: str, user_id: str, month: str)
         root, _ = build_agents()
         answer = await asyncio.wait_for(_run(root, user_id, {"business_id": business_id, "month": month}, [types.Part.from_text(text=question)]), timeout=25)
         if answer and len(answer.strip()) > 5:
-            return {"answer": answer, "agent": "cashpilot_root_agent (Google ADK)"}
+            q_lower = question.lower()
+            agent_role = "Tax Reconciliation Agent" if any(w in q_lower for w in ["cash", "payable", "itc", "match", "credit", "2b"]) else (
+                "Vendor Communication Agent" if any(w in q_lower for w in ["vendor", "supplier", "defaulter", "notice", "email", "block"]) else (
+                    "GST Legal RAG Agent" if any(w in q_lower for w in ["section", "rule", "act", "law", "penalty", "why", "legal"]) else "Google ADK Multi-Agent"
+                )
+            )
+            return {"answer": answer, "agent": f"{agent_role} (Google ADK)"}
     except Exception as exc:  # noqa: BLE001
         if gemini.is_quota_error(exc):
             gemini.mark_quota_hit()
         # fall back to the local rule-based decision engine
 
     fallback = _fallback_copilot_answer(question, business_id, month)
-    return {"answer": fallback, "agent": "cashpilot_decision_engine (Grounded Fallback)"}
+    q_lower = question.lower()
+    agent_role = "Tax Reconciliation Agent" if any(w in q_lower for w in ["cash", "payable", "itc", "match", "credit", "2b"]) else (
+        "Vendor Communication Agent" if any(w in q_lower for w in ["vendor", "supplier", "defaulter", "notice", "email", "block"]) else "GST Legal RAG Agent"
+    )
+    return {"answer": fallback, "agent": f"{agent_role} (Grounded Fallback)"}
 
 
 async def extract_with_agent(data: bytes, mime_type: str) -> dict:

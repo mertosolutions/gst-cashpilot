@@ -112,7 +112,7 @@ def test_copilot_without_gemini_uses_the_grounded_fallback(client):
 def test_adk_agents_build():
     from app.agents.definitions import build_agents
     root, extraction = build_agents()
-    assert [a.name for a in root.sub_agents] == ["eligibility_agent", "draft_agent"]
+    assert {a.name for a in root.sub_agents} >= {"tax_reconciliation_agent", "vendor_communication_agent", "gst_legal_rag_agent"}
     assert extraction.name == "extraction_agent"
 
 

@@ -9,6 +9,7 @@ import zlib
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import LegalChunk
 from app.services import gemini, vertex_search
 from app.services.util import rules_config, rules_passages
@@ -39,8 +40,13 @@ def current_engine() -> str:
     return "gemini-embedding" if gemini.enabled() else "local-hash"
 
 
+_LAST = {"vertex": None}  # whether the last search really ran on Vertex AI Search (None = not searched yet)
+
+
 def backend_name() -> str:
-    return "vertex-ai-search" if vertex_search.enabled() else current_engine()
+    if vertex_search.enabled() and _LAST["vertex"] is not False:
+        return "Google Cloud Vertex AI Search (managed RAG)"
+    return current_engine()
 
 
 def embed_many(texts: list[str], engine: str) -> list[list[float]]:
@@ -84,9 +90,11 @@ def search_many(db: Session, queries: list[dict]) -> list[list[dict]]:
         try:
             found = [vertex_search.search(q["text"], k) for q in queries]
             if all(found):
+                _LAST["vertex"] = True
                 return found
         except Exception:  # noqa: BLE001
             pass
+        _LAST["vertex"] = False
     chunks = db.query(LegalChunk).all()
     if not chunks or not queries:
         return [[] for _ in queries]
