@@ -12,6 +12,7 @@ router = APIRouter(prefix="/draft", tags=["gstr-3b draft"])
 
 
 import copy
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
@@ -72,6 +73,40 @@ def _get_active_tables_and_versions(db: Session, business: Business, month: str)
         for ver in all_versions
     ]
     return active_ver.tables, version_list, active_ver.version_number
+
+
+def _save_version(db: Session, business: Business, month: str, tables: dict, label: str, summary: str, created_by: str) -> int:
+    """Stores `tables` as the next version, makes it the active one and keeps the older versions in the history."""
+    existing = db.query(Gstr3bVersion).filter_by(business_id=business.id, month=month).all()
+    new_num = max([v.version_number for v in existing] + [0]) + 1
+    for v in existing:
+        v.is_active = False
+    db.add(Gstr3bVersion(business_id=business.id, month=month, version_number=new_num, label=f"v{new_num} ({label})"[:100], change_summary=summary[:300],
+                         created_by=created_by[:100], tables=tables, is_active=True))
+    d = db.query(Gstr3bDraft).filter_by(business_id=business.id, month=month).first()
+    if d:
+        d.tables = tables
+    else:
+        db.add(Gstr3bDraft(business_id=business.id, month=month, tables=tables))
+    db.commit()
+    return new_num
+
+
+@router.post("/edit", response_model=Detail)
+def edit_draft(payload: dict = Body(...), month: str = Depends(month_param), db: Session = Depends(get_db), business: Business = Depends(get_business)):
+    """Saves a manual edit of the draft tables as a new version (the older versions stay in the history). Derived cash figures are recomputed here."""
+    current_tables, _, _ = _get_active_tables_and_versions(db, business, month)
+    new_tables, err = draft_ai.sanitize_tables(payload.get("tables") or {}, current_tables)
+    if err:
+        raise HTTPException(422, err)
+    changes = draft_ai.diff_tables(current_tables, new_tables)
+    if not changes:
+        tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
+        return {"success": False, "message": "No changes to save.", "changes": [], "tables": tables, "versions": versions, "current_version": current_ver}
+    note = str(payload.get("note") or "").strip()
+    new_num = _save_version(db, business, month, new_tables, "Manual edit", note or "; ".join(changes[:3]), f"{business.legal_name} (manual edit)")
+    tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
+    return {"success": True, "message": f"Saved as version v{new_num}", "changes": changes, "tables": tables, "versions": versions, "current_version": current_ver}
 
 
 @router.get("", response_model=Detail)
@@ -208,6 +243,17 @@ def draft_chat(
                 created = True
             else:
                 answer += f"\n\nI could not find version v{ai['restore_version']}."
+        elif ai["action"] == "modify" and ai["edited_tables"]:  # a direct edit of the document, for example removing a row
+            new_tables, err = draft_ai.sanitize_tables(ai["edited_tables"], current_tables)
+            changes = draft_ai.diff_tables(current_tables, new_tables) if not err else []
+            if err:
+                answer += f"\n\n{err}"
+            elif not changes:
+                answer += "\n\nThe draft already looks like that, so no new version was created."
+            else:
+                new_num = _save_version(db, business, month, new_tables, ai["label"] or "Gemini edit", ai["change_summary"] or "; ".join(changes[:3]), "Gemini (GSTR-3B Copilot)")
+                answer += f"\n\n**Draft updated to v{new_num}. Changes applied:**\n" + "\n".join(f"- {c}" for c in changes)
+                created = True
         elif ai["action"] == "modify":
             new_tables, warns = draft_ai.build_tables(ai["figures"], ai["pct"], ai["itc_adj"], ai["out_adj"])
             new_num = max([v["version_number"] for v in versions] + [current_ver]) + 1
@@ -229,6 +275,12 @@ def draft_chat(
         tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
         return {"answer": answer, "version_created": created, "current_version": current_ver, "versions": versions, "tables": tables, "engine": ai["engine"]}
     fallback_engine = f"keyword rules (Gemini was not used: {draft_ai.LAST_ERROR['why'] or 'unavailable'})"
+    # Without Gemini only the short fixed commands (the buttons) are understood. Anything else is refused instead of being guessed at, so no wrong version is created.
+    if len(p_lower) > 70 or re.search(r"\d", p_lower):
+        tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
+        return {"answer": ("I could not use Gemini for this request just now, so **I changed nothing**. Without Gemini I only understand the short buttons above "
+                           "(conservative, aggressive, explain). You can edit any value or remove a row yourself with the **pencil icon** on the draft, or ask again in a minute."),
+                "version_created": False, "current_version": current_ver, "versions": versions, "tables": tables, "engine": fallback_engine}
 
     # Case 1: Adjustment intent: "conservative", "hold back at-risk", "safe mode", "exclude"
     if any(k in p_lower for k in ["conservative", "case a", "hold back", "safe mode", "exclude at risk", "only eligible"]):

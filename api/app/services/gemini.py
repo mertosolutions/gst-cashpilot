@@ -32,19 +32,32 @@ def available() -> bool:
 
 
 @lru_cache
-def _client():
-    s = get_settings()
-    if not s.gemini_enabled:
-        raise GeminiUnavailable("No Gemini credentials are configured")
+def _make_client(backend: str):
     from google import genai
     from google.genai import types
-    # one attempt and a timeout: waiting through long retries is worse than falling back to the local engine
+    s = get_settings()
+    # one attempt and a timeout: waiting through long retries is worse than falling back
     http = types.HttpOptions(timeout=30_000, retry_options=types.HttpRetryOptions(attempts=1))
-    if s.genai_backend == "vertex":
+    if backend == "vertex":  # billed to the Google Cloud project (credits); on Cloud Run it signs in with the service account
         if s.vertex_api_key:  # Vertex AI express mode
             return genai.Client(vertexai=True, api_key=s.vertex_api_key, http_options=http)
         return genai.Client(vertexai=True, project=s.google_cloud_project, location=s.google_cloud_location, http_options=http)
     return genai.Client(api_key=s.gemini_api_key, http_options=http)
+
+
+def _has_dev_key() -> bool:
+    return bool(get_settings().gemini_api_key)
+
+
+def _client(backend: str | None = None, live: bool = False):
+    """The Gemini client for a backend. Gemini Live is only available with the API key, so `live=True` always uses it."""
+    s = get_settings()
+    b = "developer" if live else (backend or s.genai_backend)
+    if b == "developer" and not _has_dev_key():
+        raise GeminiUnavailable("No Gemini API key is configured")
+    if b == "vertex" and not s.gemini_enabled:
+        raise GeminiUnavailable("No Vertex AI project is configured")
+    return _make_client(b)
 
 
 def enabled() -> bool:
@@ -54,7 +67,7 @@ def enabled() -> bool:
 def embed(texts: list[str]) -> list[list[float]]:
     s = get_settings()
     from google.genai import types
-    resp = _client().models.embed_content(model=s.gemini_embed_model, contents=texts,
+    resp = _client("developer" if _has_dev_key() else None).models.embed_content(model=s.gemini_embed_model, contents=texts,
                                           config=types.EmbedContentConfig(output_dimensionality=768))
     return [list(e.values) for e in resp.embeddings]
 
@@ -64,26 +77,35 @@ _SKIP_UNTIL: dict[str, float] = {}  # a model that was overloaded is skipped for
 LAST_MODEL = {"name": ""}  # the model that really answered the last call, so the UI can say which one it was
 
 
-def _generate(contents, config=None) -> str:
-    """Calls the configured model; when it is overloaded (503/504), over its quota (429) or unknown (404) the next model in the list is tried."""
+def _candidates() -> list[tuple[str, str]]:
+    """(backend, model) pairs to try in order: the configured one first, then the API key's models when the key exists."""
     s = get_settings()
+    out = [(s.genai_backend, s.gemini_model)]
+    if _has_dev_key():
+        out += [("developer", m) for m in FALLBACK_MODELS]
+    return list(dict.fromkeys(out))
+
+
+def _generate(contents, config=None) -> str:
+    """Calls the configured model; when it is overloaded (503/504), over its quota (429) or unknown (404) the next candidate is tried."""
     last: Exception | None = None
-    models = [m for m in dict.fromkeys([s.gemini_model, *FALLBACK_MODELS]) if _SKIP_UNTIL.get(m, 0) < time.time()] or [s.gemini_model]
-    for model in models:
+    cands = [c for c in _candidates() if _SKIP_UNTIL.get(f"{c[0]}:{c[1]}", 0) < time.time()] or _candidates()[:1]
+    for backend, model in cands:
+        key = f"{backend}:{model}"
         try:
-            resp = _client().models.generate_content(model=model, contents=contents, config=config)
-            LAST_MODEL["name"] = model
+            resp = _client(backend).models.generate_content(model=model, contents=contents, config=config)
+            LAST_MODEL["name"] = model + (" on Vertex AI" if backend == "vertex" else "")
             return (resp.text or "").strip()
         except Exception as exc:  # noqa: BLE001
             last = exc
             t = f"{type(exc).__name__} {exc}"
             if is_quota_error(exc):
-                # the quota is per model: skip this one (a day limit for long, a per-minute limit briefly) and try the next model
-                _SKIP_UNTIL[model] = time.time() + (3600 if "PerDay" in t or "per day" in t.lower() else 90)
+                # the quota is per model: skip this one (a day limit for long, a per-minute limit briefly) and try the next
+                _SKIP_UNTIL[key] = time.time() + (3600 if "PerDay" in t or "per day" in t.lower() else 90)
                 continue
             if not any(k in t for k in ("503", "504", "UNAVAILABLE", "DEADLINE", "404", "NOT_FOUND", "overloaded", "high demand", "Timeout", "timed out")):
                 raise
-            _SKIP_UNTIL[model] = time.time() + 300
+            _SKIP_UNTIL[key] = time.time() + 300
     raise last  # type: ignore[misc]
 
 

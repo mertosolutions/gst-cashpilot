@@ -28,13 +28,16 @@ Decide what the user wants and answer with ONLY a JSON object:
  "claim_at_risk_percent": number from 0 to 100 = the share of the at-risk ITC (credit not confirmed in GSTR-2B) to claim in the selected case (modify only),
  "itc_adjustments": [{"head": "igst"|"cgst"|"sgst", "amount": number (positive adds claimed ITC, negative reduces it), "reason": "text"}],
  "output_adjustments": [{"head": "igst"|"cgst"|"sgst", "amount": number (positive adds output tax, negative reduces it), "reason": "text"}],
- "restore_version": number (restore only)
+ "restore_version": number (restore only),
+ "edited_tables": the COMPLETE updated draft document (same structure as CURRENT DRAFT: table_3_1, table_4, table_6, summary) - use this when the user asks to remove, add or rename a row, or to change a value directly (modify only)
 }
 Rules for you:
 - Adjustments are measured from the ORIGINAL auto-draft figures in FIGURES, not from the current draft. The CURRENT DRAFT shows the adjustments already applied under summary.adjustments;
   repeat the ones the user wants to keep and add or change the new ones.
 - claim_at_risk_percent already claims that share of the at-risk credit. Do NOT also add itc_adjustments for the same amounts: itc_adjustments are only for extra manual changes the user asks for
   (for example "reduce CGST credit by 3000"). Without such a request, itc_adjustments must be empty.
+- For a direct edit ("remove the blocked row", "add a row", "set IGST output to 50000"), return edited_tables with exactly that change and everything else unchanged, and leave
+  claim_at_risk_percent out. Do not invent figures the user did not ask for. The app recomputes the cash payable of every case from the output tax and ITC claimed, and Case A and Case B follow the (A) and At-risk rows of Table 4, so change only the row the user named.
 - Blocked credit (Section 17(5)) can never be claimed. Do not add ITC above eligible plus at-risk. Say so if the user asks for it.
 - Use "explain" when the user only asks a question. Use "modify" only when the user clearly asks for a change. When a request is unclear, use "explain" and ask what they mean.
 - Never invent figures. Do not do arithmetic for totals: the app recomputes them. Do not claim anything is filed. This is a draft for the owner or a CA to review."""
@@ -135,6 +138,88 @@ def ask(db: Session, business_id: str, month: str, message: str, current_tables:
     out = {"action": action, "answer": str(d["answer"]), "label": str(d.get("label") or "")[:100], "change_summary": str(d.get("change_summary") or "")[:300],
            "pct": max(0.0, min(100.0, _num(d.get("claim_at_risk_percent")))), "itc_adj": _clean(d.get("itc_adjustments")), "out_adj": _clean(d.get("output_adjustments")),
            "restore_version": int(_num(d.get("restore_version"))) or None,
+           "edited_tables": d.get("edited_tables") if isinstance(d.get("edited_tables"), dict) else None,
            "engine": f"Gemini ({gemini.LAST_MODEL['name']}) + " + ("Vertex AI Search (managed RAG)" if rag_backend == "vertex-ai-search" else "local rule search (managed RAG not reachable)")}
     out["figures"] = f
     return out
+
+
+def _heads(d) -> dict:
+    return {h: round(max(0.0, _num((d or {}).get(h))), 2) for h in HEADS}
+
+
+def sanitize_tables(new: dict, old: dict) -> tuple[dict | None, str]:
+    """Checks an edited draft (from Gemini or from the manual editor) and rebuilds what is derived from it. Returns (tables, error).
+    Numbers are non-negative and rounded; the cash payable of every case is recomputed as max(0, output tax - ITC claimed) per head."""
+    try:
+        t31, t4, t6 = new["table_3_1"], new["table_4"], new["table_6"]
+        out = _heads(t31.get("tax"))
+        rows = [{"label": (str(r.get("label", ""))[:120].strip() or "Row"), "tax": _heads(r.get("tax"))} for r in (t4.get("rows") or [])[:20] if isinstance(r, dict)]
+        # Table 4 feeds Table 6: Case A claims the (A) row, Case B claims the (A) row plus the "At risk" row. When one of those rows was changed and the
+        # case's own ITC was not changed in the same edit, the case follows the row. An ITC value the user typed into Table 6 is always kept.
+        def row_of(rs, start):
+            return next((r["tax"] for r in rs if r["label"].lower().startswith(start)), None)
+        old_rows = [{"label": r["label"], "tax": _heads(r.get("tax"))} for r in (old.get("table_4") or {}).get("rows", [])]
+        old_cases = {c["key"]: _heads(c.get("itc_claimed")) for c in (old.get("table_6") or {}).get("cases", [])}
+        el_new, el_old = row_of(rows, "(a)"), row_of(old_rows, "(a)")
+        ar_new, ar_old = row_of(rows, "at risk - not"), row_of(old_rows, "at risk - not")
+        cases, seen = [], set()
+        for c in (t6.get("cases") or [])[:6]:
+            key = str(c.get("key", "?"))[:2]
+            if key in seen:
+                continue
+            seen.add(key)
+            itc = _heads(c.get("itc_claimed"))
+            if itc == old_cases.get(key):  # the case's own ITC was not edited: let it follow Table 4
+                if key == "A" and el_new is not None and el_old is not None and el_new != el_old:
+                    itc = dict(el_new)
+                elif key == "B" and el_new is not None and ar_new is not None and (el_new != el_old or ar_new != ar_old):
+                    itc = {h: round(el_new[h] + ar_new[h], 2) for h in HEADS}
+            cash = {h: round(max(0.0, out[h] - itc[h]), 2) for h in HEADS}
+            cases.append({"key": key, "label": str(c.get("label", ""))[:120], "itc_claimed": itc, "cash": cash, "total": round(sum(cash.values()), 2)})
+        if not cases:
+            return None, "The draft must keep at least one payment case in Table 6."
+        old_sum = old.get("summary") or {}
+        sel = (new.get("summary") or {}).get("selected_case") or old_sum.get("selected_case") or cases[0]["key"]
+        if sel not in seen:
+            sel = cases[0]["key"]
+        a = next((c for c in cases if c["key"] == "A"), None)
+        b = next((c for c in cases if c["key"] == "B"), None)
+        summary = {**old_sum, "selected_case": sel, "cash_saved_by_case_b": round(a["total"] - b["total"], 2) if a and b else old_sum.get("cash_saved_by_case_b", 0.0)}
+        tables = {"table_3_1": {"title": str(t31.get("title") or old["table_3_1"]["title"])[:120], "taxable_value": round(max(0.0, _num(t31.get("taxable_value"))), 2), "tax": out},
+                  "table_4": {"title": str(t4.get("title") or old["table_4"]["title"])[:120], "rows": rows},
+                  "table_6": {"title": str(t6.get("title") or old["table_6"]["title"])[:120], "cases": cases}, "summary": summary}
+        return tables, ""
+    except (KeyError, TypeError, AttributeError) as exc:
+        return None, f"The edited document was not in the expected shape ({type(exc).__name__}), so nothing was changed."
+
+
+def diff_tables(old: dict, new: dict) -> list[str]:
+    """Plain-language list of what changed between two drafts, written by code so it is always true."""
+    lines: list[str] = []
+    o, n = old["table_3_1"], new["table_3_1"]
+    if abs(o["taxable_value"] - n["taxable_value"]) > 0.004:
+        lines.append(f"Table 3.1 taxable value: ₹{o['taxable_value']:,.2f} → ₹{n['taxable_value']:,.2f}")
+    for h in HEADS:
+        if abs(o["tax"][h] - n["tax"][h]) > 0.004:
+            lines.append(f"Table 3.1 {h.upper()} output tax: ₹{o['tax'][h]:,.2f} → ₹{n['tax'][h]:,.2f}")
+    orows, nrows = {r["label"]: r for r in old["table_4"]["rows"]}, {r["label"]: r for r in new["table_4"]["rows"]}
+    lines += [f"Table 4: removed the row \"{l}\"" for l in orows if l not in nrows]
+    lines += [f"Table 4: added the row \"{l}\"" for l in nrows if l not in orows]
+    for l in nrows:
+        if l in orows:
+            for h in HEADS:
+                if abs(orows[l]["tax"][h] - nrows[l]["tax"][h]) > 0.004:
+                    lines.append(f"Table 4 \"{l}\" {h.upper()}: ₹{orows[l]['tax'][h]:,.2f} → ₹{nrows[l]['tax'][h]:,.2f}")
+    ocases, ncases = {c["key"]: c for c in old["table_6"]["cases"]}, {c["key"]: c for c in new["table_6"]["cases"]}
+    lines += [f"Table 6: removed Case {k}" for k in ocases if k not in ncases]
+    lines += [f"Table 6: added Case {k}" for k in ncases if k not in ocases]
+    for k in ncases:
+        if k in ocases:
+            for h in HEADS:
+                if abs(ocases[k]["itc_claimed"][h] - ncases[k]["itc_claimed"][h]) > 0.004:
+                    lines.append(f"Table 6 Case {k} {h.upper()} ITC claimed: ₹{ocases[k]['itc_claimed'][h]:,.2f} → ₹{ncases[k]['itc_claimed'][h]:,.2f}")
+    osel, nsel = (old.get("summary") or {}).get("selected_case") or "A", (new.get("summary") or {}).get("selected_case") or "A"  # a draft without a stored choice means Case A
+    if osel != nsel:
+        lines.append(f"Selected case: {osel} → {nsel}")
+    return lines

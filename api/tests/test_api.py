@@ -330,3 +330,69 @@ def test_chat_answer_is_written_by_gemini_from_data_and_rag(client, monkeypatch)
     assert r["answer"] == "Kalyan Logistics holds the most at-risk credit." and "Gemini" in r["engine"] and "Vertex AI Search" in r["engine"]
     assert "Section 16(2)(aa)" in seen["prompt"] and "Kalyan Logistics" in seen["prompt"]  # the rules and the data both reach the model
     assert len(r["results"]["items"]) == 1  # the cards still come from the exact search
+
+
+def test_manual_edit_saves_a_new_version_and_keeps_history(client):
+    import copy
+    H = {"X-Demo-User": "demo-owner"}
+    P = {"month": "2026-09"}
+    d0 = client.get("/api/v1/draft", headers=H, params=P).json()
+    t = copy.deepcopy(d0["tables"])
+    removed = t["table_4"]["rows"].pop()["label"]  # remove the last Table 4 row
+    t["table_6"]["cases"][0]["itc_claimed"]["cgst"] += 500  # and claim 500 more CGST in Case A
+    r = client.post("/api/v1/draft/edit", json={"tables": t, "note": "CA review"}, headers=H, params=P).json()
+    assert r["success"] and any(removed in c for c in r["changes"]) and any("Case A CGST ITC claimed" in c for c in r["changes"])
+    d1 = client.get("/api/v1/draft", headers=H, params=P).json()
+    assert d1["current_version"] == d0["current_version"] + 1 and len(d1["tables"]["table_4"]["rows"]) == len(d0["tables"]["table_4"]["rows"]) - 1
+    a0, a1 = d0["tables"]["table_6"]["cases"][0], d1["tables"]["table_6"]["cases"][0]
+    assert a1["cash"]["cgst"] == max(0, round(d1["tables"]["table_3_1"]["tax"]["cgst"] - a1["itc_claimed"]["cgst"], 2))  # cash is recomputed by the server
+    assert [v["version_number"] for v in d1["versions"]][:2] == [d1["current_version"], d0["current_version"]]  # history kept, newest first
+    assert client.post("/api/v1/draft/edit", json={"tables": d1["tables"]}, headers=H, params=P).json()["success"] is False  # nothing changed, nothing saved
+    assert client.post("/api/v1/draft/edit", json={"tables": {"table_3_1": {}}}, headers=H, params=P).status_code == 422
+
+
+def test_gemini_can_remove_a_row_from_the_draft(client, monkeypatch):
+    import copy
+    from app.services import gemini
+    H = {"X-Demo-User": "demo-owner"}
+    P = {"month": "2026-08"}
+    before = client.get("/api/v1/draft", headers=H, params=P).json()
+    edited = copy.deepcopy(before["tables"])
+    gone = edited["table_4"]["rows"].pop(1)["label"]
+    monkeypatch.setattr(gemini, "available", lambda: True)
+    monkeypatch.setattr(gemini, "generate_json", lambda prompt, system=None: {"action": "modify", "answer": "Removed that row.", "label": "Remove row", "change_summary": "Removed a row", "edited_tables": edited})
+    gemini.LAST_MODEL["name"] = "test-model"
+    r = client.post("/api/v1/draft/chat", json={"message": "remove the second row from table 4"}, headers=H, params=P).json()
+    after = client.get("/api/v1/draft", headers=H, params=P).json()
+    assert r["version_created"] and gone in r["answer"] and len(after["tables"]["table_4"]["rows"]) == len(before["tables"]["table_4"]["rows"]) - 1
+    assert after["current_version"] == before["current_version"] + 1
+
+
+def test_changing_the_at_risk_row_updates_case_b_and_cash(client):
+    import copy
+    H = {"X-Demo-User": "demo-owner"}
+    P = {"month": "2026-07"}
+    d0 = client.get("/api/v1/draft", headers=H, params=P).json()["tables"]
+    t = copy.deepcopy(d0)
+    row = next(r for r in t["table_4"]["rows"] if r["label"].lower().startswith("at risk - not"))
+    row["tax"]["cgst"] = 303.0  # "make the at-risk CGST 303"
+    r = client.post("/api/v1/draft/edit", json={"tables": t}, headers=H, params=P).json()
+    assert r["success"]
+    d1 = client.get("/api/v1/draft", headers=H, params=P).json()["tables"]
+    a0, b0 = d0["table_6"]["cases"][0], d0["table_6"]["cases"][1]
+    a1, b1 = d1["table_6"]["cases"][0], d1["table_6"]["cases"][1]
+    el = next(r for r in d1["table_4"]["rows"] if r["label"].lower().startswith("(a)"))["tax"]
+    assert a1["itc_claimed"] == a0["itc_claimed"]  # Case A does not claim at-risk credit
+    assert b1["itc_claimed"]["cgst"] == round(el["cgst"] + 303.0, 2) and b1["itc_claimed"]["cgst"] != b0["itc_claimed"]["cgst"]  # Case B follows the row
+    assert b1["cash"]["cgst"] == max(0, round(d1["table_3_1"]["tax"]["cgst"] - b1["itc_claimed"]["cgst"], 2))
+
+
+def test_without_gemini_an_unclear_draft_request_changes_nothing(client, monkeypatch):
+    from app.services import gemini
+    H = {"X-Demo-User": "demo-owner"}
+    P = {"month": "2026-06"}
+    monkeypatch.setattr(gemini, "available", lambda: False)
+    before = client.get("/api/v1/draft", headers=H, params=P).json()["current_version"]
+    r = client.post("/api/v1/draft/chat", json={"message": "I want the At risk - not confirmed (hold back) CGST to be 303 instead of what it is now"}, headers=H, params=P).json()
+    assert r["version_created"] is False and "changed nothing" in r["answer"] and "keyword rules" in r["engine"]
+    assert client.get("/api/v1/draft", headers=H, params=P).json()["current_version"] == before

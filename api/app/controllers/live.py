@@ -99,7 +99,7 @@ async def live(ws: WebSocket, token: str | None = None, user: str | None = None,
         await ws.close(code=4404)
         return
     month = month if month in months else months[-1]
-    if not get_settings().gemini_enabled:  # Live has its own model and quota, so the text chat's cooldown must not block it
+    if not get_settings().gemini_api_key:  # Gemini Live runs on the API key (not on Vertex), with its own model and quota, so the text chat's cooldown must not block it
         await ws.send_json({"type": "error", "message": "Gemini is not available right now (no key or the quota is used up). Type your question in the chat instead."})
         await ws.close(code=4503)
         return
@@ -107,7 +107,7 @@ async def live(ws: WebSocket, token: str | None = None, user: str | None = None,
     await ws.send_json({"type": "status", "text": "the API is connecting to Gemini Live"})
     from google.genai import types
     try:
-        async with gemini._client().aio.live.connect(model=s.gemini_live_model, config=_live_config()) as session:  # noqa: E501
+        async with gemini._client(live=True).aio.live.connect(model=s.gemini_live_model, config=_live_config()) as session:  # noqa: E501
             await ws.send_json({"type": "ready", "model": s.gemini_live_model, "month": month})
 
             async def from_browser() -> None:
