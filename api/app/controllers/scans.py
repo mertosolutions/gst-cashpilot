@@ -174,6 +174,7 @@ def _remove_scanned_invoice(db: Session, business: Business, d: Document) -> str
         db.query(ItcCheck).filter_by(purchase_invoice_id=inv.id).delete(synchronize_session=False)
         db.query(Match).filter_by(purchase_invoice_id=inv.id).delete(synchronize_session=False)
         db.delete(inv)
+        db.flush()  # the invoice must be gone before its document row can be deleted (Postgres enforces the foreign key)
     return month
 
 
@@ -202,6 +203,9 @@ def delete_scan(doc_id: str, db: Session = Depends(get_db), business: Business =
         Path(d.file_uri).unlink(missing_ok=True)
     except OSError:
         pass
+    db.query(PurchaseInvoice).filter_by(document_id=d.id).update({"document_id": None}, synchronize_session=False)
+    d.invoice_id = None
+    db.flush()
     db.delete(d)
     db.commit()
     if month:
