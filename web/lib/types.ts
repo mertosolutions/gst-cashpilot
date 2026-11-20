@@ -27,7 +27,7 @@ export interface Check { key: string; label: string; status: "ok" | "warn" | "fa
 export interface ScanStage { key: string; name: string; status: string; ms: number; detail: string }
 export interface ScanFields { supplier_name: string | null; supplier_gstin: string; invoice_no: string | null; invoice_date: string | null; taxable_value: number; igst: number; cgst: number; sgst: number; total: number; category: string }
 export interface Scan { id: string; filename: string; status: string; engine: string | null; fields: ScanFields | null; confidence: Record<string, number> | null; checks: Check[]; stages: ScanStage[]; notes: string[]; invoice_id: string | null; created_at: string }
-export interface SystemStatus { api: string; database: string; auth_mode: string; gemini_configured: boolean; gemini_model: string; embedding_engine: string; adk_version: string; rules_indexed: number; tenant_isolation: string }
+export interface SystemStatus { rag_live?: string; api: string; database: string; auth_mode: string; gemini_configured: boolean; gemini_model: string; embedding_engine: string; adk_version: string; rules_indexed: number; tenant_isolation: string }
 export interface Me { uid: string; business_id: string; legal_name: string; gstin: string; auth_mode: string }
 export type Heads = { igst: number; cgst: number; sgst: number };
 export interface DraftVersion {
@@ -47,6 +47,6 @@ export interface Draft {
     table_3_1: { title: string; taxable_value: number; tax: Heads };
     table_4: { title: string; rows: { label: string; tax: Heads }[] };
     table_6: { title: string; cases: { key: string; label: string; itc_claimed: Heads; cash: Heads; total: number }[] };
-    summary: { cash_saved_by_case_b: number; has_sales: boolean };
+    summary: { cash_saved_by_case_b: number; has_sales: boolean; selected_case?: string; adjustments?: { claim_at_risk_percent: number; itc_adjustments: { head: string; amount: number; reason: string }[]; output_adjustments: { head: string; amount: number; reason: string }[] } };
   };
 }

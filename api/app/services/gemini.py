@@ -39,7 +39,7 @@ def _client():
     from google import genai
     from google.genai import types
     # one attempt and a timeout: waiting through long retries is worse than falling back to the local engine
-    http = types.HttpOptions(timeout=45_000, retry_options=types.HttpRetryOptions(attempts=1))
+    http = types.HttpOptions(timeout=30_000, retry_options=types.HttpRetryOptions(attempts=1))
     if s.genai_backend == "vertex":
         if s.vertex_api_key:  # Vertex AI express mode
             return genai.Client(vertexai=True, api_key=s.vertex_api_key, http_options=http)
@@ -59,10 +59,45 @@ def embed(texts: list[str]) -> list[list[float]]:
     return [list(e.values) for e in resp.embeddings]
 
 
-def generate_text(prompt: str) -> str:
+FALLBACK_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"]
+_SKIP_UNTIL: dict[str, float] = {}  # a model that was overloaded is skipped for a few minutes so later calls are not slow
+LAST_MODEL = {"name": ""}  # the model that really answered the last call, so the UI can say which one it was
+
+
+def _generate(contents, config=None) -> str:
+    """Calls the configured model; when it is overloaded (503) or unknown (404) the next model in the list is tried. Quota errors are not retried."""
     s = get_settings()
-    resp = _client().models.generate_content(model=s.gemini_model, contents=prompt)
-    return (resp.text or "").strip()
+    last: Exception | None = None
+    models = [m for m in dict.fromkeys([s.gemini_model, *FALLBACK_MODELS]) if _SKIP_UNTIL.get(m, 0) < time.time()] or [s.gemini_model]
+    for model in models:
+        try:
+            resp = _client().models.generate_content(model=model, contents=contents, config=config)
+            LAST_MODEL["name"] = model
+            return (resp.text or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            t = f"{type(exc).__name__} {exc}"
+            if is_quota_error(exc) or not any(k in t for k in ("503", "UNAVAILABLE", "404", "NOT_FOUND", "504", "DEADLINE", "overloaded", "high demand", "Timeout", "timed out")):
+                raise
+            _SKIP_UNTIL[model] = time.time() + 300
+    raise last  # type: ignore[misc]
+
+
+def generate_text(prompt: str, system: str | None = None) -> str:
+    from google.genai import types
+    cfg = types.GenerateContentConfig(system_instruction=system, temperature=0.2) if system else None
+    return _generate(prompt, cfg)
+
+
+def generate_json(prompt: str, system: str | None = None) -> dict:
+    """Gemini answers with JSON only (response_mime_type), which the caller validates before using."""
+    from google.genai import types
+    cfg = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", temperature=0.1)
+    text = _generate(prompt, cfg)
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
+    return json.loads(text)
 
 
 def generate_json_from_file(data: bytes, mime_type: str, prompt: str) -> dict:

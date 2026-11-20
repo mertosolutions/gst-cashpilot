@@ -134,5 +134,38 @@ def search_many(db: Session, queries: list[dict]) -> list[list[dict]]:
     return out
 
 
+_HEALTH = {"at": 0.0, "text": ""}
+
+
+def health_check() -> str:
+    """A real test search on the managed service (cached for a minute): says whether the managed RAG answers, or why it does not."""
+    import time
+    if time.time() - _HEALTH["at"] < 60 and _HEALTH["text"]:
+        return _HEALTH["text"]
+    if not vertex_search.enabled():
+        text = "not enabled: the local rule search is in use"
+    else:
+        try:
+            res = vertex_search.search("invoice not reported by the supplier in GSTR-2B", 3)
+            text = f"ok: Vertex AI Search returned {len(res)} passages" + (f" (top: {res[0]['citation']})" if res else "")
+        except Exception as exc:  # noqa: BLE001
+            text = f"failing: {type(exc).__name__}: {str(exc)[:140]}"
+    _HEALTH.update(at=time.time(), text=text)
+    return text
+
+
+def search_for_chat(db: Session, text: str, k: int = 3) -> tuple[list[dict], str]:
+    """Rule passages for a chat question. The managed Vertex AI Search answer is used as it is, including 'nothing relevant' (an empty list),
+    so an off-topic question gets no rule attached. Only a real failure falls back to the local engine. Returns (passages, backend)."""
+    if vertex_search.enabled():
+        try:
+            res = _vertex_many([text], k)[0]
+            _LAST["vertex"] = True
+            return res, "vertex-ai-search"
+        except Exception:  # noqa: BLE001
+            _LAST["vertex"] = False
+    return search(db, text, []), "local"
+
+
 def search(db: Session, text: str, tags: list[str] | None = None) -> list[dict]:
     return search_many(db, [{"text": text, "tags": tags or []}])[0]

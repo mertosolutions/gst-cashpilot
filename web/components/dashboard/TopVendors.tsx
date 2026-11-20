@@ -5,6 +5,7 @@ import { CheckCircle2, Mail, Search, Send, X } from "lucide-react";
 import { Card, ErrorBox, Pagination, Pill, Skeleton, usePageSize } from "@/components/ui";
 import VendorDrawer from "@/components/dashboard/VendorDrawer";
 import { api } from "@/lib/api";
+import { openBlankTab, showInGmail } from "@/lib/gmail";
 import { useApp } from "@/lib/app-context";
 import { inr, pct } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
@@ -31,14 +32,17 @@ export default function TopVendors() {
 
   const triggerNotice = async (gstin: string, name: string) => {
     setNoticeBusy(true);
+    const tab = openBlankTab();
     try {
-      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number } }>(`/vendors/${gstin}/notice`, {}, { month });
-      setNoticeSent(`Notice prepared and saved for ${name} (₹${inr(res.notice?.at_risk_amount || 0)} at-risk ITC). No email service is connected, so nothing was delivered.`);
+      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number; recipient_email: string; subject: string; body: string } }>(`/vendors/${gstin}/notice`, {}, { month });
+      const opened = showInGmail(tab, { subject: res.notice.subject, body: res.notice.body });
+      setNoticeSent(`Notice for ${name} (₹${inr(res.notice?.at_risk_amount || 0)} at-risk ITC) is saved. ${opened ? "Gmail opened with the draft. Add the supplier's email address and press Send." : "Your browser blocked the Gmail tab. Allow pop-ups and try again."}`);
       setNoticeTarget(null);
       setTimeout(() => setNoticeSent(null), 5000);
       reload();
     } catch {
-      alert("Could not send notice. Please check network connection.");
+      tab?.close();
+      alert("Could not prepare the notice. Please check the network connection.");
     } finally {
       setNoticeBusy(false);
     }
@@ -47,12 +51,18 @@ export default function TopVendors() {
   const triggerBulkNotices = async () => {
     if (!confirm(`Send automated GSTR-1 non-filing reminder notices to all defaulting suppliers for ${month}?`)) return;
     setNoticeBusy(true);
+    const tab = openBlankTab();
     try {
-      const res = await api.post<{ success: boolean; notices_sent: number; total_at_risk: number }>("/vendors/send-bulk-notices", {}, { month });
-      setNoticeSent(`Prepared and saved ${res.notices_sent} notices covering ₹${inr(res.total_at_risk)} at-risk ITC. No email service is connected, so nothing was delivered.`);
+      const res = await api.post<{ success: boolean; notices_sent: number; total_at_risk: number; vendors: { recipient_email: string }[] }>("/vendors/send-bulk-notices", {}, { month });
+      const opened = showInGmail(tab, {
+        subject: `GSTR-1 reminder: invoices missing from GSTR-2B (${month})`,
+        body: `Dear supplier,\n\nSome of your invoices to us for ${month} do not appear in our GSTR-2B. Under Section 16(2)(aa) of the CGST Act we can claim input tax credit only on invoices you have reported in GSTR-1.\n\nPlease file or correct your GSTR-1 at the earliest and confirm once done. A separate statement with your invoice list will follow.\n\nThank you.`,
+      });
+      setNoticeSent(`${res.notices_sent} notices (₹${inr(res.total_at_risk)} at-risk ITC) are saved. ${opened ? "Gmail opened with a general reminder. Add the supplier addresses (use Bcc) and press Send." : "Your browser blocked the Gmail tab. Allow pop-ups and try again."}`);
       setTimeout(() => setNoticeSent(null), 6000);
       reload();
     } catch {
+      tab?.close();
       alert("Could not complete bulk notices.");
     } finally {
       setNoticeBusy(false);

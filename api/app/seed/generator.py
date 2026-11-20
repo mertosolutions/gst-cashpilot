@@ -25,7 +25,7 @@ def _tax(v: float, gstin: str, rate: float):
     return (0.0, round(t / 2, 2), round(t / 2, 2)) if gstin.startswith("27") else (t, 0.0, 0.0)
 
 
-def generate_month(month: str, seed: int, growth: float = 1.0, vendors: list | None = None) -> dict[str, bytes]:
+def generate_month(month: str, seed: int, growth: float = 1.0, vendors: list | None = None, series: str = "") -> dict[str, bytes]:
     VENDORS_ = vendors or VENDORS
     rng = random.Random(seed)
     y, mo = int(month[:4]), int(month[5:])
@@ -38,7 +38,7 @@ def generate_month(month: str, seed: int, growth: float = 1.0, vendors: list | N
         v = float(rng.choice([4000, 6500, 8200, 12000, 15500, 21000, 27500, 34000, 42000, 56000]) * growth)
         igst, cgst, sgst = _tax(v, g, rng.choice([0.05, 0.12, 0.18]))
         day = rng.randint(1, 28)
-        row = dict(no=f"INV/{i:03d}" if i % 2 else f"{name[:3].upper()}-{i:04d}", date=f"{y:04d}-{mo:02d}-{day:02d}", gstin=g, name=name,
+        row = dict(no=f"{series}INV/{i:03d}" if i % 2 else f"{series}{name[:3].upper()}-{i:04d}", date=f"{y:04d}-{mo:02d}-{day:02d}", gstin=g, name=name,
                    taxable=v, igst=igst, cgst=cgst, sgst=sgst, category=cat)
         books.append(row)
         roll = rng.random()

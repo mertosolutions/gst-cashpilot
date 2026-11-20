@@ -206,6 +206,7 @@ class AskBody(BaseModel):
 
 
 class SystemStatus(BaseModel):
+    rag_live: str = ""  # result of a real test search on the managed RAG, e.g. 'ok: 3 passages (Section 16(2)(aa)...)'
     api: str
     database: str
     auth_mode: str

@@ -62,7 +62,14 @@ def parse_amount(t: str) -> tuple[str, float] | None:
 def parse_top_n(t: str) -> int | None:
     t = _words_to_digits(t)
     m = re.search(r"\b(?:top|first|biggest|largest|worst)\s*(\d{1,2})\b", t)
-    return int(m.group(1)) if m else None
+    if m:
+        return int(m.group(1))
+    # "only 1 vendor", "any one vendor", "just one", "a single supplier", "the leading vendor", "who is the top vendor"
+    if re.search(r"\b(?:only|just|any|single)\s*(?:1|one|a)?\s*(?:vendor|supplier|invoice)s?\b|\b(?:only|just|any)\s*(?:1|one)\b|\b(?:1|one)\s+(?:vendor|supplier|invoice)\b", t):
+        return 1
+    if re.search(r"\b(?:leading|main|biggest|largest|top|worst|number 1|no\.? 1)\s+(?:vendor|supplier)\b(?!s)|\bwho\s+is\s+(?:the\s+)?(?:leading|main|biggest|largest|worst)\b", t):
+        return 1
+    return None
 
 
 def parse_month(t: str, available: list[str], current: str) -> str:
@@ -225,6 +232,12 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
             intent = "top_vendors_by_purchase"
             spoken = (f"Your top vendors by purchases in {month_label(month)} are: " + ", ".join(f"{r['name']} {inr(r['spend'])}" for r in rows[:3]) + "." if rows
                       else f"There are no purchases in {month_label(month)}.")
+        elif rows and n == 1:
+            r0 = rows[0]
+            total = analytics.month_metrics(db, business_id, month)["blocked" if sort == "blocked" else "at_risk"]
+            share = f" That is {r0[sort] / total * 100:.0f} percent of all {'blocked' if sort == 'blocked' else 'at-risk'} credit." if total else ""
+            matched = f" Only {r0['matched_pct']:.0f} percent of its invoices match GSTR-2B." if r0.get("matched_pct") is not None else ""
+            spoken = f"The leading vendor in {month_label(month)} is {r0['name']}, holding {inr(r0[sort])} of {'blocked' if sort == 'blocked' else 'at-risk'} credit.{share}{matched}"
         elif rows:
             parts = [f"{r['name']} {inr(r[sort])}" for r in rows[:3]]
             spoken = f"In {month_label(month)}, {'blocked' if sort == 'blocked' else 'at-risk'} credit is held mostly by: " + ", ".join(parts) + (f". The top three hold {v['top3_share']:.0f} percent of the at-risk credit." if sort == "at_risk" else ".")
@@ -241,22 +254,42 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
             rows = [r for r in rows if (r[field] >= amount[1] if amount[0] == "gte" else r[field] <= amount[1])]
         if top_n:
             rows = rows[:top_n]
-        res = {"type": "invoices", "items": rows}
-        what = " ".join(x for x in [(status or "").replace("_", " "), (match or "").replace("_", " ")] if x) or "all"
-        who = f" from {vendor.name}" if vendor else ""
-        thr = f" with {field.replace('claimable', 'eligible')} amount {'above' if amount and amount[0] == 'gte' else 'below'} {inr(amount[1])}" if amount else ""
-        total_risk = sum(r["at_risk"] for r in rows)
-        if wants_count and not rows:
-            spoken = f"There are no {what} invoices{who}{thr} in {month_label(month)}."
-        elif not rows:
-            spoken = f"I found no {what} invoices{who}{thr} in {month_label(month)}."
-        else:
-            spoken = f"I found {len(rows)} {what} invoice{'s' if len(rows) != 1 else ''}{who}{thr} in {month_label(month)}."
-            if total_risk:
-                spoken += f" Together, {inr(total_risk)} is at risk."
+        asks_why = bool(re.search(r"\b(why|explain|reason|how come|because)\b", t)) and bool(rows) and not wants_count
+        if asks_why:
             top = rows[0]
-            spoken += f" The largest is {top['vendor']}, invoice {top['invoice_no']}, with {inr(max(top['at_risk'], top['blocked'], top['claimable'], top['taxable']))}."
-        intent = "count_invoices" if wants_count else "search_invoices"
+            d = analytics.reconciliation_detail(db, business_id, top["match_id"]) or {}
+            dec = d.get("decision")
+            label = {"at_risk": "At risk", "blocked": "Blocked", "eligible": "Eligible"}
+            res = {"type": "invoices", "items": [top]}
+            if dec:
+                real = label.get(dec["status"], dec["status"])
+                premise = ""
+                if "blocked" in t and dec["status"] != "blocked":
+                    premise = f"It is not blocked. It is {real}, which means the credit is held back for now, not lost. "
+                elif status == "blocked" and dec["status"] != "blocked":
+                    premise = f"It is {real}, not Blocked. "
+                spoken = (f"The largest invoice is {top['invoice_no']} from {top['vendor']} ({inr(top[field])}). {premise}"
+                          f"Status: {real}. {dec['reason']}" + (f" Rule: {dec['citation']}." if dec.get("citation") else ""))
+            else:
+                spoken = (f"The largest invoice is {top['invoice_no']} from {top['vendor']}. It is {top['match_type'].replace('_', ' ')} and has no ITC decision because it is not in your books.")
+            intent = "explain_invoice"
+        else:
+            res = {"type": "invoices", "items": rows}
+            what = " ".join(x for x in [(status or "").replace("_", " "), (match or "").replace("_", " ")] if x) or "all"
+            who = f" from {vendor.name}" if vendor else ""
+            thr = f" with {field.replace('claimable', 'eligible')} amount {'above' if amount and amount[0] == 'gte' else 'below'} {inr(amount[1])}" if amount else ""
+            total_risk = sum(r["at_risk"] for r in rows)
+            if wants_count and not rows:
+                spoken = f"There are no {what} invoices{who}{thr} in {month_label(month)}."
+            elif not rows:
+                spoken = f"I found no {what} invoices{who}{thr} in {month_label(month)}."
+            else:
+                spoken = f"I found {len(rows)} {what} invoice{'s' if len(rows) != 1 else ''}{who}{thr} in {month_label(month)}."
+                if total_risk:
+                    spoken += f" Together, {inr(total_risk)} is at risk."
+                top = rows[0]
+                spoken += f" The largest is {top['vendor']}, invoice {top['invoice_no']}, with {'a taxable value of ' if field == 'taxable' else ''}{inr(top[field])}{' at risk' if field == 'at_risk' else ''}."
+            intent = "count_invoices" if wants_count else "search_invoices"
     else:
         intent = "unknown"
         spoken = "I did not understand that. You can ask about vendors, at-risk or blocked invoices, invoices missing in 2B, a vendor's invoices, or your cash payable."

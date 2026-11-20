@@ -71,10 +71,11 @@ export default function ChatWidget() {
       setMsgs((m) => [...m, { id: uid(), role: "user", text }]);
       return;
     }
-    setBusy("Searching your data..."); setMsgs((m) => [...m, { id: uid(), role: "user", text }]);
+    setBusy("Searching your data and the GST rules, then asking Gemini..."); setMsgs((m) => [...m, { id: uid(), role: "user", text }]);
     try {
-      const v = await api.post<VoiceAnswer>("/voice/query", { text, lang, month }, { month });
-      if (v.intent !== "unknown") {
+      const history = msgs.filter((x) => (x.role === "user" || x.role === "agent") && x.text).slice(-6).map((x) => ({ role: x.role === "user" ? "user" : "assistant", text: x.text }));
+      const v = await api.post<VoiceAnswer>("/voice/query", { text, lang, month, history }, { month });
+      if (v.intent !== "unknown" || v.engine.startsWith("Gemini")) {  // Gemini writes the reply; the exact search only supplies the data and the cards
         setMsgs((m) => [...m, { id: uid(), role: "agent", text: v.answer, voice: v }]);
         if (viaVoice && voiceReplies && canSpeak()) speak(v.spoken, v.spoken_language === "en" ? "en-IN" : lang);
       } else {
@@ -85,7 +86,7 @@ export default function ChatWidget() {
       }
     } catch (e) { setMsgs((m) => [...m, { id: uid(), role: "error", text: (e as Error).message }]); }
     finally { setBusy(null); }
-  }, [busy, lang, liveState, month, voiceReplies]);
+  }, [busy, lang, liveState, month, voiceReplies, msgs]);
 
   /* ---------- Gemini Live ---------- */
   const onLive = useCallback((m: LiveMessage) => {

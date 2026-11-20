@@ -3,6 +3,7 @@ import { useState } from "react";
 import { clsx } from "clsx";
 import { CheckCircle2, Download, History, MessageSquare, RotateCcw, Send, ShieldCheck, Sparkles } from "lucide-react";
 import { Card, ErrorBox, LayerChip, Segmented, Skeleton } from "@/components/ui";
+import Markdown from "@/components/chat/Markdown";
 import { api } from "@/lib/api";
 import { useApp } from "@/lib/app-context";
 import { inr } from "@/lib/format";
@@ -17,7 +18,8 @@ const Row = ({ label, h, total = true }: { label: string; h: Heads; total?: bool
 export default function DraftPage() {
   const { month } = useApp();
   const { data, error, reload } = useApi<Draft>("/draft");
-  const [caseKey, setCaseKey] = useState<"A" | "B">("A");
+  const [pickedCase, setPickedCase] = useState<string | null>(null);
+  const [chatEngine, setChatEngine] = useState<string | null>(null);
   const [chatPrompt, setChatPrompt] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatAnswer, setChatAnswer] = useState<string | null>(null);
@@ -28,7 +30,8 @@ export default function DraftPage() {
 
   const t = data.tables;
   const cases = t.table_6.cases;
-  const sel = cases.find((c) => c.key === caseKey)!;
+  const caseKey = pickedCase && cases.some((c) => c.key === pickedCase) ? pickedCase : (t.summary.selected_case ?? "A");  // the case the assistant selected, unless you click another
+  const sel = cases.find((c) => c.key === caseKey) ?? cases[0];
   const versions = data.versions || [];
   const currentVer = data.current_version || 1;
 
@@ -38,12 +41,14 @@ export default function DraftPage() {
     setChatBusy(true);
     setChatPrompt("");
     try {
-      const res = await api.post<{ answer: string; version_created: boolean; current_version: number; tables: Draft["tables"] }>(
+      const res = await api.post<{ answer: string; version_created: boolean; current_version: number; tables: Draft["tables"]; engine?: string }>(
         "/draft/chat",
         { message: text },
         { month }
       );
       setChatAnswer(res.answer);
+      setChatEngine(res.engine ?? "keyword rules (Gemini was not available)");
+      if (res.version_created) setPickedCase(null);
       reload();
     } catch {
       alert("Could not process draft adjustment.");
@@ -151,8 +156,9 @@ export default function DraftPage() {
         </div>
 
         {chatAnswer && (
-          <div className="mt-3.5 rounded-xl border border-slate-200 bg-white p-3.5 text-xs text-ink-800 whitespace-pre-wrap shadow-sm">
-            {chatAnswer}
+          <div className="mt-3.5 rounded-xl border border-slate-200 bg-white p-3.5 text-xs text-ink-800 shadow-sm">
+            <Markdown text={chatAnswer} />
+            {chatEngine && <p className="mt-2 text-[11px] text-ink-500">{chatEngine}</p>}
           </div>
         )}
 
@@ -169,15 +175,15 @@ export default function DraftPage() {
           />
           <button className="btn btn-primary !py-1.5 text-xs flex items-center gap-1.5" disabled={chatBusy || !chatPrompt.trim()}>
             <Send size={13} />
-            <span>{chatBusy ? "Working..." : "Ask"}</span>
+            <span>{chatBusy ? "Gemini is working..." : "Ask"}</span>
           </button>
         </form>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className={clsx("grid gap-4", cases.length > 2 ? "md:grid-cols-2 xl:grid-cols-4" : "md:grid-cols-3")}>
         {cases.map((c) => (
-          <button key={c.key} onClick={() => setCaseKey(c.key as "A" | "B")} className={clsx("card p-5 text-left transition", caseKey === c.key && "ring-2 ring-brand-500/60")}>
-            <div className="flex items-center justify-between"><span className="text-xs font-medium text-ink-500">{c.label}</span><span className={clsx("chip", c.key === "A" ? "bg-ok-50 text-ok-700" : "bg-warn-50 text-warn-700")}>{c.key === "A" ? "Safe" : "Notice risk"}</span></div>
+          <button key={c.key} onClick={() => setPickedCase(c.key)} className={clsx("card p-5 text-left transition", caseKey === c.key && "ring-2 ring-brand-500/60")}>
+            <div className="flex items-center justify-between"><span className="text-xs font-medium text-ink-500">{c.label}</span><span className={clsx("chip", c.key === "A" ? "bg-ok-50 text-ok-700" : c.key === "B" ? "bg-warn-50 text-warn-700" : "bg-brand-50 text-brand-700")}>{c.key === "A" ? "Safe" : c.key === "B" ? "Notice risk" : "Custom"}</span></div>
             <div className="mt-2 text-3xl font-semibold tracking-tight">{inr(c.total)}</div>
             <p className="mt-1 text-xs text-ink-500">Cash payable · ITC claimed {inr(c.itc_claimed.igst + c.itc_claimed.cgst + c.itc_claimed.sgst, { compact: true })}</p>
           </button>

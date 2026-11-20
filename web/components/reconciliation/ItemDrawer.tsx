@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import { BookOpen, CheckCircle2, Mail, Send, Sparkles } from "lucide-react";
 import { Drawer, ErrorBox, ItcBadge, LayerChip, Pill, Skeleton, StatusDot } from "@/components/ui";
 import { api } from "@/lib/api";
+import { openBlankTab, showInGmail } from "@/lib/gmail";
 import { inr } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import { LAYER_META } from "@/lib/layers";
@@ -36,12 +37,15 @@ export default function ItemDrawer({ matchId, onClose, onChanged }: { matchId: s
   async function sendNotice() {
     if (!data?.vendor.gstin) return;
     setNoticeBusy(true);
+    const tab = openBlankTab();
     try {
-      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number } }>(`/vendors/${data.vendor.gstin}/notice`, {});
-      setNoticeSent(`Notice prepared and saved for ${data.vendor.name}. Nothing was emailed.`);
+      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number; recipient_email: string; subject: string; body: string } }>(`/vendors/${data.vendor.gstin}/notice`, {});
+      const opened = showInGmail(tab, { subject: res.notice.subject, body: res.notice.body });
+      setNoticeSent(opened ? `Notice for ${data.vendor.name} saved. Gmail opened with the draft. Add the supplier's email address and press Send.` : "Your browser blocked the Gmail tab. Allow pop-ups and try again.");
       setTimeout(() => setNoticeSent(null), 5000);
     } catch {
-      alert("Failed to send compliance notice");
+      tab?.close();
+      alert("Could not prepare the notice");
     } finally {
       setNoticeBusy(false);
     }
@@ -79,7 +83,7 @@ export default function ItemDrawer({ matchId, onClose, onChanged }: { matchId: s
                     className="btn btn-secondary !py-1 text-xs flex items-center gap-1.5 border-warn-300 bg-white hover:bg-warn-50 text-warn-900"
                   >
                     <Send size={12} className="text-warn-600" />
-                    <span>{noticeBusy ? "Sending..." : "Notify Defaulter Supplier"}</span>
+                    <span>{noticeBusy ? "Preparing..." : "Notify in Gmail"}</span>
                   </button>
                 </div>
               )}

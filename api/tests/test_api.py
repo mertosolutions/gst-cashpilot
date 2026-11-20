@@ -275,3 +275,58 @@ def test_delete_all_data_blanks_only_my_workspace(client):
         assert out["deleted"] is True and out["rows"]["purchase_invoices"] > 0
         assert analytics.available_months(db, b.id) == [] and b.gstin == ""
     assert client.get("/api/v1/dashboard/summary", params={"month": "2026-10"}).json() == before  # the demo owner is untouched
+
+
+
+def test_draft_assistant_applies_gemini_adjustments_and_recomputes(client, monkeypatch):
+    """Gemini decides, code applies: the tables are rebuilt from the figures and the cash is recomputed by code, not taken from the model."""
+    from app.services import draft_ai, gemini
+    H = {"X-Demo-User": "demo-owner"}
+    P = {"month": "2026-10"}
+    seen = {}
+
+    def fake_json(prompt, system=None):
+        seen["prompt"] = prompt
+        return {"action": "modify", "answer": "Claiming half of the at-risk credit.", "label": "Claim 50% at risk", "change_summary": "Half of at-risk claimed",
+                "claim_at_risk_percent": 50, "itc_adjustments": [{"head": "cgst", "amount": -1000, "reason": "CA review"}], "output_adjustments": []}
+    monkeypatch.setattr(gemini, "available", lambda: True)
+    monkeypatch.setattr(gemini, "generate_json", fake_json)
+    gemini.LAST_MODEL["name"] = "test-model"
+    before = client.get("/api/v1/draft", headers=H, params=P).json()["tables"]
+    r = client.post("/api/v1/draft/chat", json={"message": "claim half of the at-risk credit and cut CGST credit by 1000"}, headers=H, params=P).json()
+    assert r["version_created"] and "CURRENT DRAFT" in seen["prompt"] and "table_6" in seen["prompt"]  # the whole document goes to the model
+    after = client.get("/api/v1/draft", headers=H, params=P).json()
+    t = after["tables"]
+    assert t["summary"]["selected_case"] == "C" and after["current_version"] > before["summary"].get("v", 0)
+    a, b = t["table_6"]["cases"][0], t["table_6"]["cases"][1]
+    c = next(x for x in t["table_6"]["cases"] if x["key"] == "C")
+    assert b["total"] < c["total"] < a["total"] and "Gemini" in r["engine"]
+    # restore the auto-draft so other tests see the original numbers
+    client.post("/api/v1/draft/versions/1/restore", headers=H, params=P)
+
+
+def test_draft_adjustments_cannot_claim_more_than_available_credit():
+    from app.services import draft_ai
+    f = {"output": {"igst": 1000.0, "cgst": 5000.0, "sgst": 5000.0}, "eligible": {"igst": 100.0, "cgst": 500.0, "sgst": 500.0},
+         "at_risk": {"igst": 50.0, "cgst": 100.0, "sgst": 100.0}, "blocked": {"igst": 0.0, "cgst": 0.0, "sgst": 0.0}, "sales_taxable": 50000.0, "has_sales": True}
+    tables, warnings = draft_ai.build_tables(f, 100, [{"head": "cgst", "amount": 9999, "reason": "too much"}], [])
+    custom = next(c for c in tables["table_6"]["cases"] if c["key"] == "C")
+    assert custom["itc_claimed"]["cgst"] == 600.0 and custom["cash"]["cgst"] == 4400.0 and warnings  # capped at eligible + at risk
+
+
+def test_chat_answer_is_written_by_gemini_from_data_and_rag(client, monkeypatch):
+    from app.services import gemini, rag
+    H = {"X-Demo-User": "demo-owner"}
+    seen = {}
+    monkeypatch.setattr(gemini, "available", lambda: True)
+    monkeypatch.setattr(rag, "search_for_chat", lambda db, text, k=3: ([{"citation": "Section 16(2)(aa), CGST Act, 2017", "topic": "Invoice must appear in GSTR-2B", "body": "text", "engine": "vertex-ai-search"}], "vertex-ai-search"))
+
+    def fake_text(prompt, system=None):
+        seen["prompt"] = prompt
+        return "Kalyan Logistics holds the most at-risk credit."
+    monkeypatch.setattr(gemini, "generate_text", fake_text)
+    gemini.LAST_MODEL["name"] = "test-model"
+    r = client.post("/api/v1/voice/query", json={"text": "who is the leading vendor", "lang": "en-IN", "month": "2026-10"}, headers=H, params={"month": "2026-10"}).json()
+    assert r["answer"] == "Kalyan Logistics holds the most at-risk credit." and "Gemini" in r["engine"] and "Vertex AI Search" in r["engine"]
+    assert "Section 16(2)(aa)" in seen["prompt"] and "Kalyan Logistics" in seen["prompt"]  # the rules and the data both reach the model
+    assert len(r["results"]["items"]) == 1  # the cards still come from the exact search

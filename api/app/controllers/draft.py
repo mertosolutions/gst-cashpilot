@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.core.security import get_business
 from app.models import Business, Gstr3bDraft
 from app.schemas.views import Detail
-from app.services import pdf, tax
+from app.services import draft_ai, pdf, tax
 
 router = APIRouter(prefix="/draft", tags=["gstr-3b draft"])
 
@@ -22,7 +22,7 @@ from app.core.database import get_db
 from app.core.security import get_business
 from app.models import Business, Gstr3bDraft, Gstr3bVersion
 from app.schemas.views import Detail
-from app.services import pdf, tax
+from app.services import draft_ai, pdf, tax
 
 router = APIRouter(prefix="/draft", tags=["gstr-3b draft"])
 
@@ -52,6 +52,12 @@ def _get_active_tables_and_versions(db: Session, business: Business, month: str)
         d = db.query(Gstr3bDraft).filter_by(business_id=business.id, month=month).first()
         tables = d.tables if d else tax.build_draft(db, business.id, month)
         active_ver = _ensure_initial_version(db, business, month, tables)
+    elif active_ver.version_number == 1 and active_ver.created_by.startswith("Pipeline"):
+        # the auto-draft follows the data until someone adjusts it: new uploads must not leave v1 showing old numbers
+        d = db.query(Gstr3bDraft).filter_by(business_id=business.id, month=month).first()
+        if d and d.tables != active_ver.tables:
+            active_ver.tables = d.tables
+            db.commit()
     
     all_versions = db.query(Gstr3bVersion).filter_by(business_id=business.id, month=month).order_by(Gstr3bVersion.version_number.desc()).all()
     version_list = [
@@ -185,6 +191,45 @@ def draft_chat(
     current_tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
     p_lower = prompt.lower()
 
+    # Gemini reads the whole draft document and decides; code validates, applies and recomputes. The keyword rules below are only the fallback.
+    ai = draft_ai.ask(db, business.id, month, prompt, current_tables, versions, current_ver)
+    if ai:
+        answer = ai["answer"]
+        created = False
+        if ai["action"] == "restore" and ai["restore_version"]:
+            target = db.query(Gstr3bVersion).filter_by(business_id=business.id, month=month, version_number=ai["restore_version"]).first()
+            if target:
+                for v in db.query(Gstr3bVersion).filter_by(business_id=business.id, month=month).all():
+                    v.is_active = (v.id == target.id)
+                d = db.query(Gstr3bDraft).filter_by(business_id=business.id, month=month).first()
+                if d:
+                    d.tables = target.tables
+                db.commit()
+                created = True
+            else:
+                answer += f"\n\nI could not find version v{ai['restore_version']}."
+        elif ai["action"] == "modify":
+            new_tables, warns = draft_ai.build_tables(ai["figures"], ai["pct"], ai["itc_adj"], ai["out_adj"])
+            new_num = max([v["version_number"] for v in versions] + [current_ver]) + 1
+            for v in db.query(Gstr3bVersion).filter_by(business_id=business.id, month=month).all():
+                v.is_active = False
+            db.add(Gstr3bVersion(business_id=business.id, month=month, version_number=new_num, label=f"v{new_num} ({ai['label'] or 'Gemini adjustment'})"[:100],
+                                 change_summary=(ai["change_summary"] or prompt)[:300], created_by="Gemini (GSTR-3B Copilot)", tables=new_tables, is_active=True))
+            d = db.query(Gstr3bDraft).filter_by(business_id=business.id, month=month).first()
+            if d:
+                d.tables = new_tables
+            else:
+                db.add(Gstr3bDraft(business_id=business.id, month=month, tables=new_tables))
+            db.commit()
+            sel = next(c for c in new_tables["table_6"]["cases"] if c["key"] == new_tables["summary"]["selected_case"])
+            answer += f"\n\n**Draft updated to v{new_num}.** Cash payable in the selected case ({sel['label']}): ₹{sel['total']:,.2f}."
+            if warns:
+                answer += "\n\n" + "\n".join(f"- {w}" for w in warns)
+            created = True
+        tables, versions, current_ver = _get_active_tables_and_versions(db, business, month)
+        return {"answer": answer, "version_created": created, "current_version": current_ver, "versions": versions, "tables": tables, "engine": ai["engine"]}
+    fallback_engine = f"keyword rules (Gemini was not used: {draft_ai.LAST_ERROR['why'] or 'unavailable'})"
+
     # Case 1: Adjustment intent: "conservative", "hold back at-risk", "safe mode", "exclude"
     if any(k in p_lower for k in ["conservative", "case a", "hold back", "safe mode", "exclude at risk", "only eligible"]):
         new_tables = copy.deepcopy(current_tables)
@@ -223,6 +268,7 @@ def draft_chat(
             "current_version": current_ver,
             "versions": versions,
             "tables": tables,
+            "engine": fallback_engine,
         }
 
     # Case 2: Aggressive intent: "aggressive", "case b", "claim all", "include at risk"
@@ -262,6 +308,7 @@ def draft_chat(
             "current_version": current_ver,
             "versions": versions,
             "tables": tables,
+            "engine": fallback_engine,
         }
 
     # Case 3: Explanation questions
@@ -273,13 +320,22 @@ def draft_chat(
         cash_a = sum(cases[0]["cash"].values()) if cases else 0
         cash_b = sum(cases[1]["cash"].values()) if len(cases) > 1 else 0
 
+        rows = t4.get("rows", [])
+        def row_total(match) -> float:  # rows are found by label: custom versions add rows, so positions are not fixed
+            r = next((x for x in rows if match(x["label"].lower())), None)
+            return round(sum((r.get("tax") or {}).values()), 2) if r else 0.0
+        taxable = t3.get("taxable_value", 0) or 0
+        output_tax = round(sum((t3.get("tax") or {}).values()), 2)
+        eligible = row_total(lambda s: s.startswith("(a)"))
+        at_risk = row_total(lambda s: s.startswith("at risk - not"))
+        blocked = row_total(lambda s: "blocked" in s)
         explanation = (
             f"### GSTR-3B Draft Analysis for {month} (Version v{current_ver})\n\n"
-            f"• **Table 3.1 (Outward Supplies):** Total taxable value ₹{t3.get('total_taxable', 0):,.2f} with output tax liability ₹{t3.get('total_tax', 0):,.2f}.\n"
-            f"• **Table 4 (Eligible ITC):** GSTR-2B confirmed credit is ₹{t4.get('eligible_itc_total', 0):,.2f}. Blocked credit under Section 17(5) is ₹{t4.get('blocked_itc_total', 0):,.2f}.\n"
+            f"• **Table 3.1 (Outward Supplies):** Total taxable value ₹{taxable:,.2f} with output tax liability ₹{output_tax:,.2f}.\n"
+            f"• **Table 4 (ITC):** Credit confirmed by GSTR-2B is ₹{eligible:,.2f}. At risk (not confirmed) is ₹{at_risk:,.2f}. Blocked under Section 17(5) is ₹{blocked:,.2f}.\n"
             f"• **Table 6 (Payment of Tax):**\n"
-            f"  - **Case A (Safe):** Pay **₹{cash_a:,.2f}** in cash by claiming only 2B confirmed credits.\n"
-            f"  - **Case B (Working Capital):** Pay **₹{cash_b:,.2f}** in cash if claiming at-risk book credits.\n\n"
+            f"  - **Case A (Safe):** Pay **₹{cash_a:,.2f}** in cash by claiming only 2B confirmed credit.\n"
+            f"  - **Case B (Working Capital):** Pay **₹{cash_b:,.2f}** in cash if you also claim the at-risk credit.\n\n"
             f"💡 *Tip:* Ask me: `\"Switch to conservative mode\"` or `\"Create a new draft claiming all credit\"` to automatically create a new version."
         )
         return {
@@ -288,6 +344,7 @@ def draft_chat(
             "current_version": current_ver,
             "versions": versions,
             "tables": current_tables,
+            "engine": fallback_engine,
         }
 
 

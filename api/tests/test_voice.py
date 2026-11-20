@@ -100,3 +100,24 @@ def test_copilot_fallback_never_crashes_and_matches_the_chat_numbers(client):
     chat = ask(client, "what is my cash payable")["answer"]
     assert cash == chat  # one engine, one answer
     assert "could not match" in client.post("/api/v1/copilot/ask", json={"question": "weather today", "month": "2026-10"}, headers=H).json()["answer"]
+
+
+def test_leading_vendor_and_only_one_vendor_return_a_single_vendor(client):
+    for q in ("WHO IS THE LEADING VENDOR", "CHOOSE ONLY 1 VENDOR", "Choose any one vendor.", "who is the top vendor"):
+        r = ask(client, q)
+        assert r["intent"] in ("top_vendors", "top_vendors_by_purchase") and len(r["results"]["items"]) == 1, q  # "top vendor" alone means by purchases
+        assert r["results"]["items"][0]["name"] in r["answer"], q
+    assert len(ask(client, "Which vendors are blocking my credit?")["results"]["items"]) > 1  # the plural still lists several
+
+
+def test_why_question_explains_the_rule_and_corrects_the_premise(client):
+    r = ask(client, "Why is the largest at-risk invoice blocked under GST rules?")
+    assert r["intent"] == "explain_invoice" and len(r["results"]["items"]) == 1
+    assert "not blocked" in r["answer"].lower() and "At risk" in r["answer"] and "Section 16" in r["answer"]
+
+
+def test_largest_amount_matches_the_list(client):
+    r = ask(client, "Show at risk invoices")
+    top = r["results"]["items"][0]
+    from app.services.voice_search import inr
+    assert inr(top["at_risk"]) in r["answer"]  # the spoken 'largest' amount is the at-risk amount the list shows

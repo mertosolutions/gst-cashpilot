@@ -4,6 +4,7 @@ import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, 
 import { CheckCircle2, Mail, Send } from "lucide-react";
 import { Drawer, ErrorBox, ItcBadge, Pill, Skeleton } from "@/components/ui";
 import { api } from "@/lib/api";
+import { openBlankTab, showInGmail } from "@/lib/gmail";
 import { inr, pct, shortMonth } from "@/lib/format";
 import { useApi } from "@/lib/hooks";
 import type { ReconItem, VendorRow } from "@/lib/types";
@@ -21,12 +22,15 @@ export default function VendorDrawer({ gstin, onClose }: { gstin: string | null;
   const sendNotice = async () => {
     if (!gstin) return;
     setSending(true);
+    const tab = openBlankTab();
     try {
-      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number } }>(`/vendors/${gstin}/notice`, {});
-      setMsg(`Notice emailed successfully for ₹${inr(res.notice?.at_risk_amount || 0)} at-risk credit.`);
+      const res = await api.post<{ success: boolean; message: string; notice: { at_risk_amount: number; recipient_email: string; subject: string; body: string } }>(`/vendors/${gstin}/notice`, {});
+      const opened = showInGmail(tab, { subject: res.notice.subject, body: res.notice.body });
+      setMsg(`Notice saved for ₹${inr(res.notice?.at_risk_amount || 0)} at-risk credit. ${opened ? "Gmail opened with the draft. Add the supplier's email address and press Send." : "Your browser blocked the Gmail tab. Allow pop-ups and try again."}`);
       reload();
     } catch {
-      alert("Failed to send notice");
+      tab?.close();
+      alert("Could not prepare the notice");
     } finally {
       setSending(false);
     }
@@ -64,7 +68,7 @@ export default function VendorDrawer({ gstin, onClose }: { gstin: string | null;
                   className="btn btn-secondary !py-1.5 text-xs flex items-center gap-1.5 font-medium border-warn-300 bg-warn-50 text-warn-900 hover:bg-warn-100"
                 >
                   <Send size={13} className="text-warn-600" />
-                  <span>{sending ? "Sending..." : "Trigger Defaulter Notice"}</span>
+                  <span>{sending ? "Preparing..." : "Notify in Gmail"}</span>
                 </button>
               )}
             </div>
