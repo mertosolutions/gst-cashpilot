@@ -65,7 +65,6 @@ export default function PipelinePage() {
           {data && <span className={clsx("chip", data.status === "ok" ? "bg-ok-50 text-ok-700" : "bg-warn-50 text-warn-700")}>{data.status === "ok" ? "All done" : "Needs a look"} · {data.total_ms < 1000 ? `${data.total_ms} ms` : `${(data.total_ms / 1000).toFixed(1)} s`}</span>}
           <button className="btn btn-primary" onClick={run} disabled={running}><Play size={15} /> {running ? "Running..." : "Run again"}</button>
         </div>}>
-        {msg && !msg.ok && <div className="mb-4"><ErrorBox message={msg.text} /></div>}
         {error ? <ErrorBox message={error} onRetry={reload} /> : !data ? <Skeleton className="h-72" /> : <LayerFlow stages={data.stages} running={running} />}
       </Card>
 
@@ -90,6 +89,7 @@ export default function PipelinePage() {
 
       <Card title="Upload data" subtitle={empty ? "Start here: add your files for a month and the layers run on them." : undefined} action={chosen > 0 ? <button className="btn btn-primary" onClick={upload} disabled={running}>{uploading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <UploadCloud size={15} />} {uploading ? "Uploading and processing..." : `Upload ${chosen} file${chosen > 1 ? "s" : ""}`}</button> : undefined}>
         {msg?.ok && <div className="mb-4 rounded-xl bg-ok-50 px-4 py-2 text-sm text-ok-700">{msg.text}</div>}
+        {msg && !msg.ok && <div className="mb-4"><ErrorBox message={msg.text} /></div>}
         <div className="grid gap-3 md:grid-cols-3">
           {SLOTS.map(({ key, title, hint, accept, icon: Icon }) => {
             const file = files[key];
