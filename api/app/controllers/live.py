@@ -99,7 +99,7 @@ async def live(ws: WebSocket, token: str | None = None, user: str | None = None,
         await ws.close(code=4404)
         return
     month = month if month in months else months[-1]
-    if not gemini.available():
+    if not get_settings().gemini_enabled:  # Live has its own model and quota, so the text chat's cooldown must not block it
         await ws.send_json({"type": "error", "message": "Gemini is not available right now (no key or the quota is used up). Type your question in the chat instead."})
         await ws.close(code=4503)
         return

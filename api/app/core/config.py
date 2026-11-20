@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(
         default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY")
     )
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-flash-lite-latest"  # gemini-3.8-flash ran out of quota; the fallback list in services/gemini.py covers other models
     gemini_embed_model: str = "gemini-embedding-001"
     gemini_live_model: str = "gemini-3.8-live"  # Gemini Live (multilingual voice assistant)
     gemini_live_voice: str = "Puck"

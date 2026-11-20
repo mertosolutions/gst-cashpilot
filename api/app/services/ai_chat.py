@@ -7,6 +7,7 @@ If Gemini is not available the exact local answer is returned and the engine lab
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy.orm import Session
@@ -26,6 +27,7 @@ SYSTEM = """You are CashPilot, a GST assistant for an Indian business. Answer ON
 - Reply in the language the user wrote in (the language code is given)."""
 
 _HISTORY_TURNS = 6
+log = logging.getLogger("cashpilot.ai")
 
 
 def _trim(items: list[dict], n: int = 8) -> list[dict]:
@@ -67,6 +69,7 @@ def answer(db: Session, business_id: str, text: str, month: str, lang: str = "en
     except Exception as exc:  # noqa: BLE001
         if gemini.is_quota_error(exc):
             gemini.mark_quota_hit()
+        log.warning("chat: Gemini call failed: %s: %s", type(exc).__name__, str(exc)[:160])
         base["engine"] = f"local intent parser (Gemini failed: {type(exc).__name__})"
         return base
     if not reply:

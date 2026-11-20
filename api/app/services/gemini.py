@@ -65,7 +65,7 @@ LAST_MODEL = {"name": ""}  # the model that really answered the last call, so th
 
 
 def _generate(contents, config=None) -> str:
-    """Calls the configured model; when it is overloaded (503) or unknown (404) the next model in the list is tried. Quota errors are not retried."""
+    """Calls the configured model; when it is overloaded (503/504), over its quota (429) or unknown (404) the next model in the list is tried."""
     s = get_settings()
     last: Exception | None = None
     models = [m for m in dict.fromkeys([s.gemini_model, *FALLBACK_MODELS]) if _SKIP_UNTIL.get(m, 0) < time.time()] or [s.gemini_model]
@@ -77,7 +77,11 @@ def _generate(contents, config=None) -> str:
         except Exception as exc:  # noqa: BLE001
             last = exc
             t = f"{type(exc).__name__} {exc}"
-            if is_quota_error(exc) or not any(k in t for k in ("503", "UNAVAILABLE", "404", "NOT_FOUND", "504", "DEADLINE", "overloaded", "high demand", "Timeout", "timed out")):
+            if is_quota_error(exc):
+                # the quota is per model: skip this one (a day limit for long, a per-minute limit briefly) and try the next model
+                _SKIP_UNTIL[model] = time.time() + (3600 if "PerDay" in t or "per day" in t.lower() else 90)
+                continue
+            if not any(k in t for k in ("503", "504", "UNAVAILABLE", "DEADLINE", "404", "NOT_FOUND", "overloaded", "high demand", "Timeout", "timed out")):
                 raise
             _SKIP_UNTIL[model] = time.time() + 300
     raise last  # type: ignore[misc]
