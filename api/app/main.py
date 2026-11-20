@@ -24,7 +24,13 @@ def _warm_up():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.core.database import Base, engine
     from app.seed.load import seed
+    from app.services import rag
+    import app.models  # noqa: F401
+    Base.metadata.create_all(engine)  # no-op when the tables exist (AlloyDB is prepared by scripts/alloydb_setup.py)
+    with SessionLocal() as db:
+        rag.ensure_rules_loaded(db)  # the shared GST rule passages every business cites
     if settings.auto_seed:
         with SessionLocal() as db:
             seed(db)
