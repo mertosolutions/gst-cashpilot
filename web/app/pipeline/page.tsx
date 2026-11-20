@@ -1,7 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import { clsx } from "clsx";
-import { FileSpreadsheet, FileText, Play, Table2, UploadCloud } from "lucide-react";
+import { FileSpreadsheet, FileText, Play, Table2, Trash2, UploadCloud } from "lucide-react";
 import { Card, ErrorBox, Skeleton } from "@/components/ui";
 import LayerFlow from "@/components/pipeline/LayerFlow";
 import RulesPanel from "@/components/pipeline/RulesPanel";
@@ -21,6 +21,9 @@ export default function PipelinePage() {
   const empty = months.length === 0;
   const { data, error, reload } = useApi<PipelineRun>(empty ? null : "/pipeline/latest");
   const [running, setRunning] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [confirmWipe, setConfirmWipe] = useState(false);
+  const [wiping, setWiping] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -35,13 +38,22 @@ export default function PipelinePage() {
     const f = new FormData();
     SLOTS.forEach((s) => { const file = files[s.key]; if (file) f.append(s.key, file); });
     if (![...f.keys()].length) { setMsg({ ok: false, text: "Choose at least one file." }); return; }
-    setRunning(true); setMsg(null);
+    setRunning(true); setUploading(true); setMsg(null);
     try {
       const r = await api.upload<{ months: string[] }>("/ingest", f);
       setMsg({ ok: true, text: `Loaded ${r.months.join(", ")} and ran the layers.` });
       setFiles({}); refresh();
     } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
-    finally { setRunning(false); }
+    finally { setRunning(false); setUploading(false); }
+  }
+  async function wipe() {
+    setWiping(true); setMsg(null);
+    try {
+      await api.del("/ingest/all");
+      setConfirmWipe(false); setFiles({}); refresh(); reload();
+      setMsg({ ok: true, text: "All your data was deleted. Upload files to start again." });
+    } catch (e) { setMsg({ ok: false, text: (e as Error).message }); }
+    finally { setWiping(false); }
   }
   const chosen = Object.values(files).filter(Boolean).length;
 
@@ -60,7 +72,23 @@ export default function PipelinePage() {
       <RulesPanel />
       </>}
 
-      <Card title="Upload data" subtitle={empty ? "Start here: add your files for a month and the layers run on them." : undefined} action={chosen > 0 ? <button className="btn btn-primary" onClick={upload} disabled={running}><UploadCloud size={15} /> Upload {chosen} file{chosen > 1 ? "s" : ""}</button> : undefined}>
+      {!empty && (
+        <Card title="Delete all data" subtitle="Removes every upload, invoice, match, decision, draft and scan in your workspace. Your sign-in stays.">
+          {confirmWipe ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm font-medium text-bad-700">This cannot be undone. Delete everything?</p>
+              <button className="btn border border-bad-700 bg-bad-700 text-white" onClick={wipe} disabled={wiping}>
+                {wiping && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />} {wiping ? "Deleting..." : "Yes, delete all"}
+              </button>
+              <button className="btn" onClick={() => setConfirmWipe(false)} disabled={wiping}>Cancel</button>
+            </div>
+          ) : (
+            <button className="btn border border-bad-500 text-bad-700" onClick={() => setConfirmWipe(true)}><Trash2 size={15} /> Delete all data</button>
+          )}
+        </Card>
+      )}
+
+      <Card title="Upload data" subtitle={empty ? "Start here: add your files for a month and the layers run on them." : undefined} action={chosen > 0 ? <button className="btn btn-primary" onClick={upload} disabled={running}>{uploading ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" /> : <UploadCloud size={15} />} {uploading ? "Uploading and processing..." : `Upload ${chosen} file${chosen > 1 ? "s" : ""}`}</button> : undefined}>
         {msg?.ok && <div className="mb-4 rounded-xl bg-ok-50 px-4 py-2 text-sm text-ok-700">{msg.text}</div>}
         <div className="grid gap-3 md:grid-cols-3">
           {SLOTS.map(({ key, title, hint, accept, icon: Icon }) => {
@@ -75,6 +103,7 @@ export default function PipelinePage() {
             );
           })}
         </div>
+        {uploading && <div role="status" className="mt-4 flex items-center gap-3 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-700"><span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-brand-100 border-t-brand-600" />Reading your files, matching invoices and running the layers. This can take a few seconds.</div>}
         <p className="mt-3 text-xs text-ink-500">Uploading a month replaces that month's files. Confirmed scans are kept.</p>
       </Card>
     </div>

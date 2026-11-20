@@ -112,7 +112,7 @@ def test_copilot_without_gemini_uses_the_grounded_fallback(client):
 def test_adk_agents_build():
     from app.agents.definitions import build_agents
     root, extraction = build_agents()
-    assert [a.name for a in root.sub_agents] == ["eligibility_agent", "draft_agent"]
+    assert {a.name for a in root.sub_agents} >= {"tax_reconciliation_agent", "vendor_communication_agent", "gst_legal_rag_agent"}
     assert extraction.name == "extraction_agent"
 
 
@@ -254,3 +254,24 @@ def test_real_user_starts_blank_and_builds_from_own_upload(client):
         ingest.ingest_purchase_register(db, b, (sample / "purchase_register_oct2026.csv").read_bytes(), "r.csv")
         assert b.gstin == "27AAAAA0000A1Z5"
         assert analytics.available_months(db, b.id) == ["2026-10"]
+
+
+def test_delete_all_data_blanks_only_my_workspace(client):
+    from app.core.database import SessionLocal
+    from app.core.security import CurrentUser, get_business
+    from app.services import analytics, ingest
+    from pathlib import Path
+    sample = Path(__file__).resolve().parents[1] / "app/data/sample"
+    with SessionLocal() as db:
+        b = get_business(CurrentUser(uid="google-wipe-user-1", name="Wipe Me", demo=False), db)
+        ingest.ingest_gstr2b(db, b, (sample / "GSTR-2B_oct2026_dummy.xlsx").read_bytes(), "g.xlsx")
+        ingest.ingest_purchase_register(db, b, (sample / "purchase_register_oct2026.csv").read_bytes(), "r.csv")
+        assert analytics.available_months(db, b.id) == ["2026-10"]
+    before = client.get("/api/v1/dashboard/summary", params={"month": "2026-10"}).json()
+    from app.controllers.ingest import delete_all_data
+    with SessionLocal() as db:
+        b = get_business(CurrentUser(uid="google-wipe-user-1", name="Wipe Me", demo=False), db)
+        out = delete_all_data(db, b, CurrentUser(uid="google-wipe-user-1", name="Wipe Me", demo=False))
+        assert out["deleted"] is True and out["rows"]["purchase_invoices"] > 0
+        assert analytics.available_months(db, b.id) == [] and b.gstin == ""
+    assert client.get("/api/v1/dashboard/summary", params={"month": "2026-10"}).json() == before  # the demo owner is untouched
